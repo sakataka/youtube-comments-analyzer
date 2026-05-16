@@ -9,26 +9,18 @@
 - MVP-0 の基本フローは動作済み。
 - 今回設定した Step 1 から Step 7 は完了済み。
 - MVP-2 の高度分析は一旦保留。
-- Codex app server 連携は実装済みだが、実 LLM 応答の受信成功は未確認。
+- Codex app server 連携は最小実呼び出しで受信成功を確認済み。
 
 ## 次に進める順番
 
-1. Codex app server 実受信の成功確認と修正
-2. 頻出語レビュー UI
-3. LLM 失敗時の degraded report
-4. 人物別魅力分析
-5. 共起・関係性分析
-6. コメントクラスタリング
-7. 運用・設定・データ管理の整理
+1. 頻出語レビュー UI
+2. LLM 失敗時の degraded report
+3. 人物別魅力分析
+4. 共起・関係性分析
+5. コメントクラスタリング
+6. 運用・設定・データ管理の整理
 
 ## P0: 直近で確認・修正したいもの
-
-### Codex app server 実受信
-
-- `codex app-server` から実 LLM 応答を最後まで受信できる状態にする。
-- `turn/completed` まで到達しない原因を、参考実装 `/Users/sakataka/Documents/youtube-transcript-exporter` と比較して切り分ける。
-- 実応答 JSON の parse 成功を確認する。
-- 失敗時に UI へ分かりやすい原因を出す。
 
 ### 頻出語レビュー UI
 

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from backend.app.candidate_extraction import extract_candidate_tokens
-from backend.app.llm_assist import parse_llm_assist_json
+from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
@@ -321,6 +321,22 @@ class PipelineTest(unittest.TestCase):
 ```"""
         )
         self.assertEqual(parsed["schema_version"], "llm_assist.v1")
+
+    def test_completed_agent_text_accepts_app_server_item_shapes(self):
+        self.assertEqual(
+            extract_completed_agent_text({"type": "agentMessage", "text": '{"ok": true}'}),
+            '{"ok": true}',
+        )
+        self.assertEqual(
+            extract_completed_agent_text(
+                {
+                    "type": "agent_message",
+                    "content": [{"type": "text", "text": '{"ok": true}'}],
+                }
+            ),
+            '{"ok": true}',
+        )
+        self.assertEqual(extract_completed_agent_text({"type": "userMessage", "text": "ignore"}), "")
 
 
 if __name__ == "__main__":

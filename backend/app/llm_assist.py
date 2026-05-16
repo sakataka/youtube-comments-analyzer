@@ -136,6 +136,7 @@ def wait_for_thread_id(process: subprocess.Popen[str], deadline: float, stderr_l
 def wait_for_turn_text(process: subprocess.Popen[str], deadline: float, stderr_lines: list[str]) -> str:
     answer = ""
     completed_answer = ""
+    agent_completed = False
     while time.monotonic() < deadline:
         message = read_json_line(process, deadline, stderr_lines)
         if "error" in message:
@@ -148,13 +149,37 @@ def wait_for_turn_text(process: subprocess.Popen[str], deadline: float, stderr_l
                 or message.get("params", {}).get("contentDelta")
                 or ""
             )
-        elif method == "item/completed" and not answer:
+        elif method == "item/completed":
             item = message.get("params", {}).get("item", {})
-            if item.get("type") == "agent_message":
-                completed_answer += item.get("text") or item.get("message") or ""
+            completed_text = extract_completed_agent_text(item)
+            if completed_text:
+                agent_completed = True
+                completed_answer = completed_text
+                return (answer or completed_answer).strip()
+        elif method == "thread/status/changed":
+            status = message.get("params", {}).get("status", {})
+            status_type = status.get("type") if isinstance(status, dict) else status
+            if status_type == "idle" and ((answer or completed_answer).strip() or agent_completed):
+                return (answer or completed_answer).strip()
         elif method == "turn/completed":
             return (answer or completed_answer).strip()
     raise RuntimeError(f"Codex App Serverのturnが時間内に完了しませんでした。{format_stderr(stderr_lines)}")
+
+
+def extract_completed_agent_text(item: dict[str, Any]) -> str:
+    if item.get("type") not in {"agent_message", "agentMessage"}:
+        return ""
+    text = item.get("text") or item.get("message")
+    if isinstance(text, str):
+        return text
+    content = item.get("content")
+    if isinstance(content, list):
+        chunks = []
+        for chunk in content:
+            if isinstance(chunk, dict) and isinstance(chunk.get("text"), str):
+                chunks.append(chunk["text"])
+        return "".join(chunks)
+    return ""
 
 
 def llm_cache_key(prompt: str) -> str:

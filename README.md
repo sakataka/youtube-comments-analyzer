@@ -168,6 +168,7 @@ data/llm_cache/<input_hash>.json
 ```
 
 同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。
+Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
 
 ## 主な API
 
