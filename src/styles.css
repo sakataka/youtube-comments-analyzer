@@ -83,15 +83,22 @@ button + button {
 
 .start-form {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 18px;
+  gap: 16px;
+  padding: 20px;
 }
 
-.start-form label:first-child,
+.start-form__url-field,
+.start-form__wide-field,
+.start-form__number-fields,
 .start-form .checkbox-label,
 .start-form button[type="submit"] {
   grid-column: 1 / -1;
+}
+
+.start-form__number-fields {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 label {
@@ -106,21 +113,23 @@ input,
 select {
   border: 1px solid #cfd8e4;
   border-radius: 8px;
-  min-height: 42px;
-  padding: 0 12px;
+  font-weight: 600;
+  min-height: 48px;
+  padding: 0 14px;
 }
 
 .field-note {
   color: #697789;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.45;
 }
 
 .checkbox-label {
   align-items: start;
-  gap: 4px 8px;
+  gap: 4px 10px;
   grid-template-columns: auto minmax(0, 1fr);
+  padding-top: 2px;
 }
 
 .checkbox-label input {
@@ -130,7 +139,7 @@ select {
 
 .checkbox-label small {
   color: #697789;
-  font-weight: 700;
+  font-weight: 600;
   grid-column: 2;
   line-height: 1.45;
 }
@@ -1759,6 +1768,7 @@ blockquote {
 @media (max-width: 760px) {
   .hero,
   .start-form,
+  .start-form__number-fields,
   .status-panel,
   .dashboard-grid,
   .dashboard-charts,

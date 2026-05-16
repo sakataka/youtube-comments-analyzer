@@ -906,32 +906,34 @@ export default function App() {
           </p>
         </div>
         <form className="start-form" onSubmit={startRun}>
-          <label>
+          <label className="start-form__url-field">
             YouTube URL
             <input value={url} onChange={(event) => setUrl(event.target.value)} />
           </label>
-          <label>
-            最大コメント数
-            <input
-              type="number"
-              min="1"
-              max="5000"
-              value={maxComments}
-              onChange={(event) => setMaxComments(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            クラスタ数
-            <input
-              type="number"
-              min="5"
-              max="12"
-              value={clusterCount}
-              onChange={(event) => setClusterCount(Number(event.target.value))}
-            />
-            <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
-          </label>
-          <label>
+          <div className="start-form__number-fields">
+            <label>
+              最大コメント数
+              <input
+                type="number"
+                min="1"
+                max="5000"
+                value={maxComments}
+                onChange={(event) => setMaxComments(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              クラスタ数
+              <input
+                type="number"
+                min="5"
+                max="12"
+                value={clusterCount}
+                onChange={(event) => setClusterCount(Number(event.target.value))}
+              />
+              <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
+            </label>
+          </div>
+          <label className="start-form__wide-field">
             返信コメント
             <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
               <option value="none">トップレベルのみ</option>
