@@ -61,6 +61,8 @@ URL 入力
 - 一般語・番組/企画名寄り候補の自動除外
 - 自動紐づけの候補理由表示
 - 表記ごとの集計除外操作
+- 表記ごとの代表コメント本文表示
+- 候補 merge 操作
 
 ### Phase 4: 分類・集計の一部
 
@@ -101,13 +103,15 @@ URL 入力
 - source fixture / cache / youtube_api
 - cache / YouTube API / fixture の UI 表示
 - cache 使用時の API 再消費なし表示
+- 取得不足の UI 表示
+- 取得エラーの API response 整理
 
 未完了:
 
 - live metadata の UI 表示強化
 - YouTube 上の comment count availability
 - いいね数分布
-- API で全件取得できない場合の詳細表示
+- API で全件取得できない場合の詳細表示強化
 
 ### 人物候補と alias
 
@@ -123,12 +127,12 @@ URL 入力
 - reason
 - 採用/除外操作
 - コメント単位で「このコメントはこの人物に紐づける」を修正するレビュー UI
-
-未完了:
-
 - alias ごとの代表コメント本文表示
 - 表記ゆれ統合 UI
 - merge 操作
+
+未完了:
+
 - `person`, `group`, `duo` 以外の折りたたみ表示
 
 ### コメント取得
@@ -139,14 +143,14 @@ URL 入力
 - max comments `5000`
 - `reply_fetch_mode=none`
 - cache
+- 取得エラーの UI 表示
+- 取得済みコメント一覧表示
 
 未完了:
 
 - `reply_fetch_mode=inline_subset`
 - `reply_fetch_mode=full`
 - `comments.list` による返信 full 取得
-- 取得エラーの UI 表示
-- 取得済みコメント一覧表示
 - 差分更新
 
 ### レポート UI
@@ -179,6 +183,10 @@ URL 入力
 
 - LLM による候補整理
 - LLM による alias 候補補完
+- コメント内のニックネームらしい語のサジェスト
+- 説明欄・タイトルにない表記の人物紐づけ候補提示
+- 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI
+- 既存人物に対する未知 alias のデルタ分析
 - 曖昧コメント分類
 - 魅力カテゴリ分類
 - 人物別要約
@@ -191,6 +199,9 @@ URL 入力
 
 - embedding
 - コメントクラスタリング
+- 日本語形態素解析
+- 固有表現抽出
+- 助詞・係り受けを使った alias 文脈判定
 - クラスタ名生成
 - 共起ネットワーク
 - 関係性分析
@@ -219,18 +230,18 @@ URL 入力
 
 優先順位は次の順です。
 
-1. 候補確認 UI に merge を追加する。
-2. 取得エラー詳細と API で全件取得できない場合の表示を強化する。
-3. LLM なしの MVP-0 を一度初期検証動画で人間確認し、alias 誤爆を修正する。
+1. `person`, `group`, `duo` 以外の折りたたみ表示を検討する。
+2. live metadata の UI 表示と YouTube 上の comment count availability を追加する。
+3. LLM なしの MVP-0 を初期検証動画で人間確認し、alias 誤爆を修正する。
 4. その後に MVP-1 の LLM 候補整理と曖昧コメント分類へ進む。
 
 ## 完了判定
 
-MVP-0 は「技術的には通る」状態です。ただし要求仕様書上の MVP-0 完了条件のうち、次はまだ改善余地があります。
+MVP-0 は要求仕様書上の vertical slice と usable review flow を満たす状態です。追加改善として次はまだ余地があります。
 
 - 主要人物候補の自動抽出精度
 - ユーザーが 1 分以内に候補確認を終えられる UI
-- 代表コメントの見やすさ
-- コメント単位の紐づけ修正
+- entity_type ごとの折りたたみ
+- live metadata の詳細表示
 
-そのため、現状は `MVP-0 vertical slice complete`、次の目標は `MVP-0 usable review flow complete` とします。
+そのため、現状は `MVP-0 usable review flow complete`、次の目標は `MVP-1 LLM-assisted analysis` とします。

@@ -123,6 +123,17 @@ select {
   margin-top: 4px;
 }
 
+.status-warning {
+  background: #fff4d6;
+  border: 1px solid #f1cf76;
+  border-radius: 8px;
+  color: #765000;
+  font-size: 13px;
+  font-weight: 800;
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+}
+
 .label {
   color: #697789;
   display: block;
@@ -343,6 +354,33 @@ h4 {
 .alias-list button {
   min-height: 30px;
   padding: 0 9px;
+}
+
+.alias-evidence {
+  grid-column: 1 / -1;
+}
+
+.alias-evidence summary {
+  color: #334255;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.alias-evidence blockquote {
+  background: #fff;
+  border-left-color: #94b3e8;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.alias-evidence small {
+  color: #697789;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 4px;
 }
 
 .report-layout {

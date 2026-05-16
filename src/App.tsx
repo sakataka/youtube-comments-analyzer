@@ -25,6 +25,11 @@ type Alias = {
   source: string;
   status: string;
   representative_comment_ids: string[];
+  representative_comments: Array<{
+    comment_id: string;
+    text_original: string;
+    like_count: number;
+  }>;
 };
 
 type Person = {
@@ -117,6 +122,7 @@ export default function App() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
@@ -211,7 +217,15 @@ export default function App() {
   }
 
   async function updateCandidate(
-    action: { type: string; person_id?: string; alias_id?: string; alias_text?: string; display_name?: string },
+    action: {
+      type: string;
+      person_id?: string;
+      alias_id?: string;
+      alias_text?: string;
+      display_name?: string;
+      source_person_id?: string;
+      target_person_id?: string;
+    },
     label: string
   ) {
     if (!run) return;
@@ -252,6 +266,17 @@ export default function App() {
       `${person.display_name} に表記「${aliasText}」を追加しました`
     );
     setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
+  }
+
+  async function mergePerson(person: Person) {
+    const targetPersonId = mergeDrafts[person.person_id];
+    if (!targetPersonId) return;
+    const target = candidates?.persons.find((candidate) => candidate.person_id === targetPersonId);
+    await updateCandidate(
+      { type: "merge_person", source_person_id: person.person_id, target_person_id: targetPersonId },
+      `${person.display_name} を ${target?.display_name ?? "選択した人物"} に統合しました`
+    );
+    setMergeDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
   }
 
   async function continueRun() {
@@ -356,6 +381,12 @@ export default function App() {
             </div>
           ) : null}
           <progress value={run.progress} max={1} />
+          {run.fetch_summary && run.fetch_summary.max_comments_fetched < run.fetch_summary.max_comments_requested ? (
+            <div className="status-warning">
+              要求 {run.fetch_summary.max_comments_requested} 件に対し、取得できたコメントは {run.fetch_summary.max_comments_fetched} 件です。
+              YouTube API 側の取得可能範囲または実コメント数による差分です。
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -455,6 +486,29 @@ export default function App() {
                       </button>
                     </div>
                   </label>
+                  <label>
+                    この候補を別人物へ統合
+                    <div className="inline-edit">
+                      <select
+                        value={mergeDrafts[person.person_id] ?? ""}
+                        onChange={(event) =>
+                          setMergeDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
+                        }
+                      >
+                        <option value="">統合先を選択</option>
+                        {(candidates?.persons ?? [])
+                          .filter((candidate) => candidate.person_id !== person.person_id && candidate.status !== "rejected")
+                          .map((candidate) => (
+                            <option key={candidate.person_id} value={candidate.person_id}>
+                              {candidate.display_name}
+                            </option>
+                          ))}
+                      </select>
+                      <button type="button" disabled={busy || !(mergeDrafts[person.person_id] ?? "")} onClick={() => mergePerson(person)}>
+                        統合
+                      </button>
+                    </div>
+                  </label>
                 </div>
                 <div className="alias-list-heading">この人物として数える表記</div>
                 <ul className="alias-list">
@@ -490,6 +544,17 @@ export default function App() {
                       >
                         {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "外し済み" : "集計から外す"}
                       </button>
+                      {alias.representative_comments.length ? (
+                        <details className="alias-evidence">
+                          <summary>代表コメント</summary>
+                          {alias.representative_comments.map((comment) => (
+                            <blockquote key={comment.comment_id}>
+                              {comment.text_original}
+                              <small>{comment.like_count} likes</small>
+                            </blockquote>
+                          ))}
+                        </details>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

@@ -509,11 +509,52 @@ class AnalysisStore:
                     "update persons set display_name = ? where id = ? and analysis_run_id = ?",
                     (action["display_name"], action["person_id"], run_id),
                 )
+            elif action_type == "merge_person":
+                source_person_id = action["source_person_id"]
+                target_person_id = action["target_person_id"]
+                if source_person_id == target_person_id:
+                    continue
+                self.merge_person_aliases(run_id, source_person_id, target_person_id)
             self.conn.execute(
                 "insert into candidate_action_logs values (?, ?, ?, ?, ?)",
                 (new_id("action"), run_id, action_type, json.dumps(action, ensure_ascii=False), utc_now()),
             )
         self.conn.commit()
+
+    def merge_person_aliases(self, run_id: str, source_person_id: str, target_person_id: str) -> None:
+        target = self.conn.execute(
+            "select id from persons where id = ? and analysis_run_id = ?",
+            (target_person_id, run_id),
+        ).fetchone()
+        source = self.conn.execute(
+            "select id from persons where id = ? and analysis_run_id = ?",
+            (source_person_id, run_id),
+        ).fetchone()
+        if not target or not source:
+            return
+        source_aliases = self.conn.execute(
+            "select * from aliases where person_id = ? and analysis_run_id = ?",
+            (source_person_id, run_id),
+        ).fetchall()
+        for alias in source_aliases:
+            duplicate = self.conn.execute(
+                """
+                select id from aliases
+                where analysis_run_id = ? and person_id = ? and normalized_alias = ?
+                """,
+                (run_id, target_person_id, alias["normalized_alias"]),
+            ).fetchone()
+            if duplicate:
+                self.conn.execute("delete from aliases where id = ? and analysis_run_id = ?", (alias["id"], run_id))
+            else:
+                self.conn.execute(
+                    "update aliases set person_id = ?, status = 'accepted' where id = ? and analysis_run_id = ?",
+                    (target_person_id, alias["id"], run_id),
+                )
+        self.conn.execute(
+            "update persons set status = 'rejected', reason = ? where id = ? and analysis_run_id = ?",
+            ("別の人物候補に統合済み", source_person_id, run_id),
+        )
 
     def classify_and_report(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
@@ -711,6 +752,7 @@ class AnalysisStore:
     def get_candidates(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         comments = self.comments_for_snapshot(run["comment_snapshot_id"])
+        comments_by_id = {comment["id"]: comment for comment in comments}
         persons = self.conn.execute("select * from persons where analysis_run_id = ? order by confidence desc", (run_id,)).fetchall()
         output = []
         for person in persons:
@@ -749,6 +791,15 @@ class AnalysisStore:
                         "status": alias["status"],
                         "is_ambiguous": bool(alias["is_ambiguous"]),
                         "representative_comment_ids": json.loads(alias["representative_comment_ids_json"]),
+                        "representative_comments": [
+                            {
+                                "comment_id": comment_id,
+                                "text_original": comments_by_id[comment_id]["text_original"],
+                                "like_count": comments_by_id[comment_id]["like_count"],
+                            }
+                            for comment_id in json.loads(alias["representative_comment_ids_json"])
+                            if comment_id in comments_by_id
+                        ],
                     }
                     for alias in aliases
                 ],

@@ -86,6 +86,10 @@ def create_run(request: RunCreateRequest) -> dict[str, str]:
         return {"run_id": run_id, "status": "waiting_for_review"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=f"YouTube API 取得に失敗しました: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"分析 run の作成に失敗しました: {exc}") from exc
 
 
 @app.get("/api/runs")

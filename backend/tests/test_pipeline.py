@@ -60,10 +60,25 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(by_name["みりちゃむ"]["status"], "accepted")
             mirichamu_alias = by_name["みりちゃむ"]["aliases"][0]
             self.assertEqual(mirichamu_alias["mention_comment_count"], by_name["みりちゃむ"]["accepted_mention_comment_count"])
+            self.assertIn("representative_comments", mirichamu_alias)
             saki_aliases = {alias["alias_text"] for alias in by_name["立野沙紀"]["aliases"]}
             self.assertIn("立野", saki_aliases)
             self.assertIn("沙紀", saki_aliases)
             self.assertNotIn("立野", by_name)
+            store.apply_candidate_actions(
+                run_id,
+                [
+                    {
+                        "type": "merge_person",
+                        "source_person_id": by_name["ニシダ"]["person_id"],
+                        "target_person_id": by_name["みりちゃむ"]["person_id"],
+                    }
+                ],
+            )
+            merged_candidates = store.get_candidates(run_id)
+            merged_by_name = {person["display_name"]: person for person in merged_candidates["persons"]}
+            self.assertEqual(merged_by_name["ニシダ"]["status"], "rejected")
+            self.assertIn("ニシダ", {alias["alias_text"] for alias in merged_by_name["みりちゃむ"]["aliases"]})
             if "バランス" in by_name:
                 self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)
