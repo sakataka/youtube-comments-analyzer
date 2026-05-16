@@ -21,6 +21,29 @@ type RunState = {
   };
 };
 
+type SettingsInfo = {
+  youtube_api_key_configured: boolean;
+  youtube_api_key_env_name: string;
+  data_dir: string;
+  database_path: string;
+  max_comments: { default: number; min: number; max: number };
+  cluster_count: { default: number; min: number; max: number };
+  reply_fetch_modes: Array<{ value: string; label: string; uses_extra_quota: boolean }>;
+  fetch_orders: string[];
+  llm_provider: string;
+  embeddings_enabled: boolean;
+};
+
+type DataSummary = {
+  data_dir: string;
+  database_bytes: number;
+  youtube_cache: { path: string; bytes: number; file_count: number };
+  runs: { path: string; bytes: number; file_count: number };
+  llm_cache: { path: string; bytes: number; file_count: number };
+  total_bytes: number;
+  run_count: number;
+};
+
 type VideoSummary = {
   youtube_video_id: string;
   url: string;
@@ -271,6 +294,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ResultTab>("candidates");
   const [run, setRun] = useState<RunState | null>(null);
   const [runHistory, setRunHistory] = useState<RunState[]>([]);
+  const [settingsInfo, setSettingsInfo] = useState<SettingsInfo | null>(null);
+  const [dataSummary, setDataSummary] = useState<DataSummary | null>(null);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
@@ -386,6 +411,7 @@ export default function App() {
 
   useEffect(() => {
     void refreshRunHistory();
+    void refreshOpsInfo();
   }, []);
 
   async function refreshRunHistory() {
@@ -395,6 +421,21 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  async function refreshOpsInfo() {
+    try {
+      const [settings, data] = await Promise.all([api<SettingsInfo>("/api/settings"), api<DataSummary>("/api/data/summary")]);
+      setSettingsInfo(settings);
+      setDataSummary(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function openRunExport() {
+    if (!run) return;
+    window.open(`${API_BASE}/api/runs/${run.run_id}/export`, "_blank", "noopener,noreferrer");
   }
 
   async function openRun(runId: string) {
@@ -722,6 +763,93 @@ export default function App() {
           ) : (
             <p className="list-note">保存済み run はまだありません。</p>
           )}
+        </div>
+      </details>
+
+      <details className="panel ops-panel">
+        <summary>
+          <div>
+            <h2>運用・設定・データ管理</h2>
+            <p>API key の読み込み状態、取得設定、保存データ容量、export 導線を確認します。</p>
+          </div>
+          <strong>{dataSummary ? formatBytes(dataSummary.total_bytes) : "未取得"}</strong>
+        </summary>
+        <div className="history-panel__body">
+          <div className="section-heading">
+            <div>
+              <h3>設定状態</h3>
+              <p>秘密値は表示せず、読み込み状態だけを出します。</p>
+            </div>
+            <button type="button" onClick={refreshOpsInfo} disabled={busy}>
+              更新
+            </button>
+          </div>
+          <div className="ops-grid">
+            <div>
+              <span className="label">{settingsInfo?.youtube_api_key_env_name ?? "YOUTUBE_API_KEY"}</span>
+              <strong>{settingsInfo?.youtube_api_key_configured ? "設定済み" : "未設定"}</strong>
+              <small>値そのものは表示しません。</small>
+            </div>
+            <div>
+              <span className="label">LLM</span>
+              <strong>{settingsInfo?.llm_provider ?? "codex_app_server"}</strong>
+              <small>追加 API key なしで Codex app server を使います。</small>
+            </div>
+            <div>
+              <span className="label">Embeddings</span>
+              <strong>{settingsInfo?.embeddings_enabled ? "有効" : "無効"}</strong>
+              <small>現在のクラスタリングは特徴語ベースです。</small>
+            </div>
+            <div>
+              <span className="label">Max Comments</span>
+              <strong>{settingsInfo?.max_comments.max ?? 5000}</strong>
+              <small>画面から 1〜5000 の範囲で指定します。</small>
+            </div>
+            <div>
+              <span className="label">Cluster Count</span>
+              <strong>
+                {settingsInfo?.cluster_count.min ?? 5}〜{settingsInfo?.cluster_count.max ?? 12}
+              </strong>
+              <small>新規分析時のクラスタ数です。</small>
+            </div>
+            <div>
+              <span className="label">Data Dir</span>
+              <strong>{dataSummary?.run_count ?? 0} runs</strong>
+              <small>{settingsInfo?.data_dir ?? dataSummary?.data_dir}</small>
+            </div>
+          </div>
+          {dataSummary ? (
+            <div className="data-summary-grid">
+              <div>
+                <strong>Database</strong>
+                <span>{formatBytes(dataSummary.database_bytes)}</span>
+              </div>
+              <div>
+                <strong>YouTube cache</strong>
+                <span>
+                  {formatBytes(dataSummary.youtube_cache.bytes)} / {dataSummary.youtube_cache.file_count} files
+                </span>
+              </div>
+              <div>
+                <strong>Runs</strong>
+                <span>
+                  {formatBytes(dataSummary.runs.bytes)} / {dataSummary.runs.file_count} files
+                </span>
+              </div>
+              <div>
+                <strong>LLM cache</strong>
+                <span>
+                  {formatBytes(dataSummary.llm_cache.bytes)} / {dataSummary.llm_cache.file_count} files
+                </span>
+              </div>
+            </div>
+          ) : null}
+          <div className="ops-actions">
+            <button type="button" onClick={openRunExport} disabled={!run}>
+              現在の run を JSON export
+            </button>
+            <small>export は明示操作だけで実行します。通常 test は fixture を使い、live API test とは分けて扱います。</small>
+          </div>
         </div>
       </details>
 
@@ -1782,6 +1910,13 @@ function llmRecommendationLabel(value: string): string {
 
 function formatNullableNumber(value?: number | null): string {
   return typeof value === "number" ? value.toLocaleString("ja-JP") : "未取得";
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function formatDateTime(value?: string): string {

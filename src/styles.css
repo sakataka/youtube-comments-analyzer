@@ -228,6 +228,80 @@ select {
   content: "閉じる";
 }
 
+.ops-panel summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.ops-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.ops-panel summary::before {
+  background: #e8edf5;
+  border-radius: 999px;
+  color: #27313d;
+  content: "開く";
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 10px;
+}
+
+.ops-panel[open] summary::before {
+  content: "閉じる";
+}
+
+.ops-panel summary p {
+  color: #647181;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.ops-panel summary strong {
+  color: #435264;
+  flex: 0 0 auto;
+}
+
+.ops-grid,
+.data-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ops-grid > div,
+.data-summary-grid > div {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.ops-grid small,
+.data-summary-grid span,
+.ops-actions small {
+  color: #647181;
+  line-height: 1.45;
+}
+
+.data-summary-grid {
+  margin-top: 12px;
+}
+
+.ops-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .history-panel summary p {
   color: #647181;
   line-height: 1.7;
@@ -1290,6 +1364,11 @@ blockquote {
   .comment-toolbar,
   .comment-assign,
   .history-card {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-grid,
+  .data-summary-grid {
     grid-template-columns: 1fr;
   }
 

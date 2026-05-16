@@ -116,6 +116,9 @@ class PipelineTest(unittest.TestCase):
             updated_comment = next(comment for comment in updated_report["comments"] if comment["comment_id"] == target_comment["comment_id"])
             self.assertNotIn(target_person["person_id"], {person["person_id"] for person in updated_comment["mentioned_persons"]})
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
+            exported = store.export_run(run_id)
+            self.assertEqual(exported["schema_version"], "run_export.v1")
+            self.assertIn("report.json", exported["artifacts"])
 
     def test_inline_subset_replies_are_saved_and_reported(self):
         with tempfile.TemporaryDirectory() as tmp:

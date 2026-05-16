@@ -128,6 +128,7 @@ bun run build
 ```
 
 `bun test` は live API を使わず、fixture で integration test を通します。
+live API を使う検証は `backend/live_tests/` に分離し、必要なときだけ `bun run test:live` で実行します。
 
 ## コメント取得データの保存と再利用
 
@@ -179,10 +180,13 @@ LLM 補助だけが失敗した場合も、候補抽出・alias・ランキン�
 - `関係性`: 同じコメント内で同時に言及された人物ペアの件数、weighted score、代表コメント、簡易カテゴリ、ヒートマップを確認できます。
 - `クラスタ`: 5〜12 件の指定クラスタ数を目安に、特徴語ベースでコメント群、代表コメント、主な人物、頻出語を確認できます。
 - `コメント`: コメント単位で人物の追加・削除を行い、代表コメントだけでは拾えない言及を補正できます。
+- `運用・設定・データ管理`: `YOUTUBE_API_KEY` の読み込み有無、LLM / embedding 状態、保存データ容量、現在 run の JSON export を確認できます。
 
 ## 主な API
 
 - `GET /api/health`
+- `GET /api/settings`
+- `GET /api/data/summary`
 - `POST /api/videos/inspect`
 - `POST /api/runs`
 - `GET /api/runs/{run_id}`
@@ -191,6 +195,7 @@ LLM 補助だけが失敗した場合も、候補抽出・alias・ランキン�
 - `POST /api/runs/{run_id}/continue`
 - `POST /api/runs/{run_id}/llm-assist`
 - `GET /api/runs/{run_id}/report`
+- `GET /api/runs/{run_id}/export`
 - `GET /api/runs`
 
 ## 実装構成

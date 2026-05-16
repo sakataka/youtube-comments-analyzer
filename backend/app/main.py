@@ -58,6 +58,50 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/settings")
+def settings() -> dict[str, Any]:
+    return {
+        "youtube_api_key_configured": bool(os.getenv("YOUTUBE_API_KEY")),
+        "youtube_api_key_env_name": "YOUTUBE_API_KEY",
+        "data_dir": str(DATA_DIR),
+        "database_path": str(DB_PATH),
+        "max_comments": {"default": 5000, "min": 1, "max": 5000},
+        "cluster_count": {"default": 8, "min": 5, "max": 12},
+        "reply_fetch_modes": [
+            {"value": "none", "label": "トップレベルのみ", "uses_extra_quota": False},
+            {"value": "inline_subset", "label": "同梱返信だけ含める", "uses_extra_quota": False},
+            {"value": "full", "label": "返信を追加取得して含める", "uses_extra_quota": True},
+        ],
+        "fetch_orders": ["relevance", "time"],
+        "llm_provider": "codex_app_server",
+        "embeddings_enabled": False,
+    }
+
+
+@app.get("/api/data/summary")
+def data_summary() -> dict[str, Any]:
+    youtube_cache = DATA_DIR / "youtube_cache"
+    runs = DATA_DIR / "runs"
+    llm_cache = DATA_DIR / "llm_cache"
+    return {
+        "data_dir": str(DATA_DIR),
+        "database_bytes": file_size(DB_PATH),
+        "youtube_cache": directory_summary(youtube_cache),
+        "runs": directory_summary(runs),
+        "llm_cache": directory_summary(llm_cache),
+        "total_bytes": directory_size(DATA_DIR),
+        "run_count": len(store.list_runs()),
+    }
+
+
+@app.get("/api/runs/{run_id}/export")
+def export_run(run_id: str) -> dict[str, Any]:
+    try:
+        return store.export_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/videos/inspect")
 def inspect_video(request: InspectRequest) -> dict[str, Any]:
     try:
@@ -162,3 +206,24 @@ def get_report(run_id: str) -> dict[str, Any]:
         return store.get_latest_report(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def file_size(path: Path) -> int:
+    return path.stat().st_size if path.exists() and path.is_file() else 0
+
+
+def directory_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(file.stat().st_size for file in path.rglob("*") if file.is_file())
+
+
+def directory_summary(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "bytes": 0, "file_count": 0}
+    files = [file for file in path.rglob("*") if file.is_file()]
+    return {
+        "path": str(path),
+        "bytes": sum(file.stat().st_size for file in files),
+        "file_count": len(files),
+    }

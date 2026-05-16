@@ -809,6 +809,25 @@ class AnalysisStore:
             raise KeyError(f"report not found: {run_id}")
         return json.loads(row["report_json"])
 
+    def export_run(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        try:
+            report = self.get_latest_report(run_id)
+        except KeyError:
+            report = None
+        artifact_dir = self.data_dir / "runs" / run_id
+        artifacts = {}
+        for name in ["raw_comments.jsonl", "person_candidates.json", "mentions.jsonl", "report.json", "llm_assist.json"]:
+            path = artifact_dir / name
+            if path.exists():
+                artifacts[name] = {"path": str(path), "bytes": path.stat().st_size}
+        return {
+            "schema_version": "run_export.v1",
+            "run": run,
+            "report": report,
+            "artifacts": artifacts,
+        }
+
     def list_runs(self) -> list[dict[str, Any]]:
         rows = self.conn.execute("select * from analysis_runs order by created_at desc limit 50").fetchall()
         return [self.get_run(row["id"]) for row in rows]

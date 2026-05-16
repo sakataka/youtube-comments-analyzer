@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1 --port 0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 0",
-    "test": "python3 -m unittest discover -s backend/tests"
+    "test": "python3 -m unittest discover -s backend/tests",
+    "test:live": "python3 -m unittest discover -s backend/live_tests"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
