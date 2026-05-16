@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.app.pipeline import AnalysisStore, alias_matches, extract_candidate_tokens
+from backend.app.candidate_extraction import extract_candidate_tokens
+from backend.app.mention_classification import alias_matches
+from backend.app.pipeline import AnalysisStore
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
 

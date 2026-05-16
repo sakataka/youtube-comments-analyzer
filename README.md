@@ -154,10 +154,13 @@ data/runs/<run_id>/
 ```text
 backend/
   app/
-    main.py       FastAPI API
-    youtube.py    YouTube URL parsing, API fetch, cache
-    pipeline.py   SQLite schema, candidate extraction, mention classification, report
-    text.py       text normalization
+    main.py                    FastAPI API
+    youtube.py                 YouTube URL parsing, API fetch, cache
+    pipeline.py                SQLite schema, run orchestration, persistence
+    candidate_extraction.py    rule-based person / alias candidate extraction
+    mention_classification.py  alias matching and mention confidence
+    report_builder.py          report JSON assembly and fetch coverage summaries
+    text.py                    text normalization
   tests/
 fixtures/
 src/

@@ -1,74 +1,16 @@
 from __future__ import annotations
 
 import json
-import math
-import re
 import sqlite3
 import uuid
-from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .text import normalize_alias, normalize_text
-
-
-HONORIFIC_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
-KATAKANA_RE = re.compile(r"[ァ-ヶー]{3,16}")
-KANJI_KATAKANA_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
-HASHTAG_RE = re.compile(r"#([一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24})")
-BRACKET_CONTENT_RE = re.compile(r"[【\[\(（]([^】\]\)）]{2,160})[】\]\)）]")
-METADATA_TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24}")
-METADATA_SPLIT_RE = re.compile(r"[、,／/・\s]+")
-GENERIC_TOKEN_STOPWORDS = {
-    "コメント",
-    "リアクション",
-    "バランス",
-    "チャンネル",
-    "サンプル",
-    "バラエティ",
-    "トーク",
-    "メンバー",
-    "エピソード",
-    "アイドル",
-    "ランキング",
-    "リリイベ",
-    "ノブロック",
-    "ゲスト",
-    "ドッキリ",
-    "シリーズ",
-    "リスト",
-    "リリースイベント",
-    "オンラインショップ",
-    "オンラインストア",
-    "ショップ",
-    "ストア",
-    "NOBROCK",
-    "YouTube",
-    "youtube",
-}
-GENERIC_TOKEN_KEYWORDS = (
-    "コメント",
-    "チャンネル",
-    "バラエティ",
-    "ランキング",
-    "エピソード",
-    "メンバー",
-    "アイドル",
-    "リリイベ",
-    "ノブロック",
-    "ゲスト",
-    "ドッキリ",
-    "シリーズ",
-    "リスト",
-    "リリースイベント",
-    "オンライン",
-    "ショップ",
-    "ストア",
-    "公式",
-    "番組",
-    "企画",
-)
+from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
+from .mention_classification import alias_match_confidence, alias_matches
+from .report_builder import build_report_payload, fetch_coverage_summary
 
 
 def utc_now() -> str:
@@ -77,52 +19,6 @@ def utc_now() -> str:
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-def like_count_distribution(comments: list[sqlite3.Row]) -> list[dict[str, int | str]]:
-    buckets = [
-        ("0", 0, 0),
-        ("1-4", 1, 4),
-        ("5-9", 5, 9),
-        ("10-49", 10, 49),
-        ("50+", 50, None),
-    ]
-    output: list[dict[str, int | str]] = []
-    for label, lower, upper in buckets:
-        count = sum(
-            1
-            for comment in comments
-            if int(comment["like_count"]) >= lower and (upper is None or int(comment["like_count"]) <= upper)
-        )
-        output.append({"label": label, "count": count})
-    return output
-
-
-def fetch_coverage_summary(video: sqlite3.Row, snapshot: sqlite3.Row) -> dict[str, Any]:
-    youtube_count = video["youtube_comment_count"]
-    fetched_count = int(snapshot["max_comments_fetched"])
-    requested_count = int(snapshot["max_comments_requested"])
-    available = bool(video["comment_count_available"])
-    if not available or youtube_count is None:
-        status = "unknown"
-        message = "YouTube 側のコメント総数は未取得です。古い cache または fixture では未表示になります。"
-    elif fetched_count >= int(youtube_count):
-        status = "complete_or_near_complete"
-        message = "YouTube 表示コメント数に対して、今回取得分は概ね到達しています。"
-    elif fetched_count >= requested_count:
-        status = "limited_by_request"
-        message = "YouTube 表示コメント数より少ないですが、今回の最大取得件数に到達しています。"
-    else:
-        status = "limited_by_api_or_availability"
-        message = "YouTube 表示コメント数より取得件数が少ないため、API の取得可能範囲や公開状態の影響がありえます。"
-    return {
-        "status": status,
-        "message": message,
-        "youtube_comment_count": youtube_count,
-        "comment_count_available": available,
-        "fetched_comment_count": fetched_count,
-        "max_comments_requested": requested_count,
-    }
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -383,79 +279,21 @@ class AnalysisStore:
         run = self.get_run_row(run_id)
         comments = self.comments_for_snapshot(run["comment_snapshot_id"])
         title = self.conn.execute("select title, description from videos where id = ?", (run["video_id"],)).fetchone()
-        frequencies: Counter[str] = Counter()
-        source_kinds: dict[str, set[str]] = defaultdict(set)
-        representative_ids: dict[str, list[str]] = defaultdict(list)
-
-        metadata_inputs = [
-            (title["title"], True, "metadata_title"),
-            (title["description"] or "", False, "metadata_description"),
-        ]
-        for text, include_loose_metadata, source_kind in metadata_inputs:
-            for token in extract_candidate_tokens(
-                text,
-                include_metadata_lists=True,
-                include_loose_metadata=include_loose_metadata,
-            ):
-                frequencies[token] += 12
-                source_kinds[token].add(source_kind)
-
-        for comment in comments:
-            seen_in_comment: set[str] = set()
-            for token in extract_candidate_tokens(comment["text_original"]):
-                normalized = normalize_alias(token)
-                if normalized not in seen_in_comment:
-                    frequencies[token] += 1
-                    source_kinds[token].add("comment")
-                    seen_in_comment.add(normalized)
-                if len(representative_ids[token]) < 3:
-                    representative_ids[token].append(comment["id"])
-
         inserted_persons: dict[str, str] = {}
-        metadata_person_tokens = [
-            token
-            for token in frequencies
-            if "metadata_title" in source_kinds[token]
-            and not is_generic_candidate(token)
-            and len(normalize_alias(token)) > 1
-        ]
-        ordered_tokens = unique_ordered_tokens([
-            *[token for token, _ in candidate_frequency_order(Counter({token: frequencies[token] for token in metadata_person_tokens}))],
-            *[token for token, _ in candidate_frequency_order(frequencies)],
-        ])
-
-        for token in ordered_tokens[:32]:
-            count = frequencies[token]
-            normalized = normalize_alias(token)
-            generic = is_generic_candidate(token)
-            from_title_metadata = "metadata_title" in source_kinds[token]
-            from_description_metadata = "metadata_description" in source_kinds[token]
-            parent_token = find_metadata_parent_token(token, metadata_person_tokens)
-            if parent_token and parent_token in inserted_persons:
+        for seed in build_candidate_seeds(title["title"], title["description"] or "", comments):
+            if seed.parent_token and seed.parent_token in inserted_persons:
                 self._insert_alias(
                     run_id=run_id,
-                    person_id=inserted_persons[parent_token],
-                    token=token,
-                    normalized=normalized,
-                    source="+".join(sorted(source_kinds[token])) or "comment",
-                    hit_count=count,
-                    confidence=min(0.88, 0.58 + count / 50),
+                    person_id=inserted_persons[seed.parent_token],
+                    token=seed.token,
+                    normalized=seed.normalized,
+                    source=seed.source,
+                    hit_count=seed.hit_count,
+                    confidence=min(0.88, 0.58 + seed.hit_count / 50),
                     status="accepted",
-                    representative_ids=representative_ids[token],
+                    representative_ids=seed.representative_ids,
                 )
                 continue
-            if len(normalized) <= 1 or generic:
-                status = "rejected"
-                confidence = 0.2
-            elif from_title_metadata:
-                status = "accepted"
-                confidence = min(0.95, 0.68 + count / 30)
-            else:
-                status = "candidate"
-                confidence = min(0.7, 0.38 + count / 40)
-            alias_status = "accepted" if status == "accepted" else "pending"
-            if status == "rejected":
-                alias_status = "rejected"
             person_id = new_id("person")
             alias_id = new_id("alias")
             self.conn.execute(
@@ -463,12 +301,12 @@ class AnalysisStore:
                 (
                     person_id,
                     run_id,
-                    token,
-                    normalized,
-                    guess_entity_type(token),
-                    status,
-                    confidence,
-                    candidate_reason(source_kinds[token], generic),
+                    seed.token,
+                    seed.normalized,
+                    seed.entity_type,
+                    seed.status,
+                    seed.confidence,
+                    seed.reason,
                     "rule",
                 ),
             )
@@ -478,31 +316,29 @@ class AnalysisStore:
                     alias_id,
                     run_id,
                     person_id,
-                    token,
-                    normalized,
-                    "+".join(sorted(source_kinds[token])) or "comment",
-                    count,
-                    confidence,
-                    alias_status,
-                    1 if len(normalized) <= 2 else 0,
-                    json.dumps(representative_ids[token], ensure_ascii=False),
+                    seed.token,
+                    seed.normalized,
+                    seed.source,
+                    seed.hit_count,
+                    seed.confidence,
+                    seed.alias_status,
+                    1 if seed.is_ambiguous else 0,
+                    json.dumps(seed.representative_ids, ensure_ascii=False),
                 ),
             )
-            inserted_persons[token] = person_id
-            if from_title_metadata and status == "accepted":
-                for alias_token in derived_name_aliases(token):
-                    alias_normalized = normalize_alias(alias_token)
-                    self._insert_alias(
-                        run_id=run_id,
-                        person_id=person_id,
-                        token=alias_token,
-                        normalized=alias_normalized,
-                        source="name_part",
-                        hit_count=frequencies.get(alias_token, 0),
-                        confidence=0.72,
-                        status="accepted",
-                        representative_ids=representative_ids.get(alias_token, []),
-                    )
+            inserted_persons[seed.token] = person_id
+            for alias_seed in seed.derived_aliases:
+                self._insert_alias(
+                    run_id=run_id,
+                    person_id=person_id,
+                    token=alias_seed.token,
+                    normalized=alias_seed.normalized,
+                    source="name_part",
+                    hit_count=alias_seed.hit_count,
+                    confidence=0.72,
+                    status="accepted",
+                    representative_ids=alias_seed.representative_ids,
+                )
 
         self.conn.execute(
             "update analysis_runs set status = ?, stage = ?, progress = ? where id = ?",
@@ -665,7 +501,7 @@ class AnalysisStore:
                             alias["id"],
                             alias["alias_text"],
                             "alias_normalized",
-                            0.9 if len(alias["normalized_alias"]) > 2 else 0.62,
+                            alias_match_confidence(alias["normalized_alias"]),
                             json.dumps({"comment_id": comment["id"], "alias": alias["alias_text"]}, ensure_ascii=False),
                         ),
                     )
@@ -755,86 +591,15 @@ class AnalysisStore:
             """,
             (run_id,),
         ).fetchall()
-        by_person: dict[str, list[sqlite3.Row]] = defaultdict(list)
-        names: dict[str, str] = {}
-        mentions_by_comment: dict[str, dict[str, str]] = defaultdict(dict)
-        for mention in mentions:
-            by_person[mention["person_id"]].append(mention)
-            names[mention["person_id"]] = mention["display_name"]
-            mentions_by_comment[mention["comment_id"]][mention["person_id"]] = mention["display_name"]
-        ranking = []
-        total_comments = max(1, len(comments))
-        for person_id, rows in by_person.items():
-            unique_by_comment = {row["comment_id"]: row for row in rows}
-            representatives = sorted(unique_by_comment.values(), key=lambda row: row["like_count"], reverse=True)[:3]
-            ranking.append({
-                "person_id": person_id,
-                "display_name": names[person_id],
-                "mention_comment_count": len(unique_by_comment),
-                "mention_rate": len(unique_by_comment) / total_comments,
-                "like_weighted_score": sum(1 + math.log1p(max(0, int(row["like_count"]))) for row in unique_by_comment.values()),
-                "representative_comments": [
-                    {
-                        "comment_id": row["comment_id"],
-                        "text_original": row["text_original"],
-                        "like_count": row["like_count"],
-                    }
-                    for row in representatives
-                ],
-            })
-        ranking.sort(key=lambda row: (row["mention_comment_count"], row["like_weighted_score"]), reverse=True)
-        return {
-            "schema_version": "report.v1",
-            "run_id": run_id,
-            "video": {
-                "youtube_video_id": video["youtube_video_id"],
-                "url": video["url"],
-                "title": video["title"],
-                "channel_title": video["channel_title"],
-                "published_at": video["published_at"],
-                "youtube_comment_count": video["youtube_comment_count"],
-                "comment_count_available": bool(video["comment_count_available"]),
-                "youtube_view_count": video["youtube_view_count"],
-                "youtube_like_count": video["youtube_like_count"],
-            },
-            "fetch_summary": {
-                "source": snapshot["source"],
-                "fetched_at": snapshot["fetched_at"],
-                "fetched_top_level_count": snapshot["fetched_top_level_count"],
-                "fetched_reply_count": snapshot["fetched_reply_count"],
-                "max_comments_fetched": snapshot["max_comments_fetched"],
-                "total_like_count": sum(int(comment["like_count"]) for comment in comments),
-                "like_count_distribution": like_count_distribution(comments),
-                "max_comments_requested": snapshot["max_comments_requested"],
-                "fetch_order": snapshot["fetch_order"],
-                "reply_fetch_mode": snapshot["reply_fetch_mode"],
-                "coverage": fetch_coverage_summary(video, snapshot),
-            },
-            "analysis_config": json.loads(run["config_json"]),
-            "persons": self.get_candidates(run_id)["persons"],
-            "rankings": {"mention_ranking": ranking},
-            "comments": [
-                {
-                    "comment_id": comment["id"],
-                    "text_original": comment["text_original"],
-                    "like_count": comment["like_count"],
-                    "mentioned_persons": [
-                        {"person_id": person_id, "display_name": display_name}
-                        for person_id, display_name in sorted(mentions_by_comment[comment["id"]].items(), key=lambda item: item[1])
-                    ],
-                }
-                for comment in comments
-            ],
-            "sections": {
-                "mention_ranking": {"status": "available"},
-                "person_candidates": {"status": "available"},
-                "raw_comments": {"status": "available"},
-                "appeal_summary": {"status": "skipped", "reason": "LLM disabled in MVP-0"},
-                "ambiguous_classification": {"status": "skipped", "reason": "LLM disabled in MVP-0"},
-                "cooccurrence": {"status": "skipped", "reason": "MVP-2 scope"},
-                "clusters": {"status": "skipped", "reason": "Embeddings disabled in MVP-0"},
-            },
-        }
+        return build_report_payload(
+            run_id=run_id,
+            video=video,
+            snapshot=snapshot,
+            comments=comments,
+            mentions=mentions,
+            analysis_config=json.loads(run["config_json"]),
+            persons=self.get_candidates(run_id)["persons"],
+        )
 
     def get_candidates(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
@@ -963,135 +728,3 @@ class AnalysisStore:
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         else:
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def extract_candidate_tokens(
-    text: str,
-    include_metadata_lists: bool = False,
-    include_loose_metadata: bool = False,
-) -> list[str]:
-    if not text:
-        return []
-    tokens: list[str] = []
-    tokens.extend(match.group(1) for match in HONORIFIC_RE.finditer(text))
-    tokens.extend(match.group(0) for match in KANJI_KATAKANA_RE.finditer(text))
-    tokens.extend(match.group(0) for match in KATAKANA_RE.finditer(text))
-    tokens.extend(match.group(1) for match in HASHTAG_RE.finditer(text))
-    if include_metadata_lists:
-        tokens.extend(extract_metadata_list_tokens(text, include_loose_metadata))
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for token in tokens:
-        cleaned_token = clean_candidate_token(token)
-        if not cleaned_token or cleaned_token in seen:
-            continue
-        cleaned.append(cleaned_token)
-        seen.add(cleaned_token)
-    return cleaned
-
-
-def extract_metadata_list_tokens(text: str, include_loose_metadata: bool = False) -> list[str]:
-    candidates: list[str] = []
-    for match in BRACKET_CONTENT_RE.finditer(text):
-        content = match.group(1)
-        for part in METADATA_SPLIT_RE.split(content):
-            candidates.extend(token for token in METADATA_TOKEN_RE.findall(part) if contains_japanese(token))
-    for hashtag in HASHTAG_RE.finditer(text):
-        candidates.append(hashtag.group(1))
-    if include_loose_metadata:
-        for part in METADATA_SPLIT_RE.split(text):
-            candidates.extend(
-                token
-                for token in METADATA_TOKEN_RE.findall(part)
-                if contains_japanese(token) and 3 <= len(token) <= 12
-            )
-    return candidates
-
-
-def clean_candidate_token(token: str) -> str:
-    token = token.strip()
-    token = re.split(r"[、。・／/\s]+", token)[-1]
-    token = re.sub(r"^[とてもはがのにをで]+", "", token)
-    token = re.sub(r"[、。・／/]+$", "", token)
-    return token
-
-
-def is_generic_candidate(token: str) -> bool:
-    normalized_stopwords = {normalize_alias(word) for word in GENERIC_TOKEN_STOPWORDS}
-    if token in GENERIC_TOKEN_STOPWORDS or normalize_alias(token) in normalized_stopwords:
-        return True
-    return any(keyword in token for keyword in GENERIC_TOKEN_KEYWORDS)
-
-
-def contains_japanese(token: str) -> bool:
-    return bool(re.search(r"[一-龥々ぁ-んァ-ヶ]", token))
-
-
-def candidate_frequency_order(frequencies: Counter[str]) -> list[tuple[str, int]]:
-    return sorted(frequencies.items(), key=lambda item: (item[1], len(normalize_alias(item[0]))), reverse=True)
-
-
-def unique_ordered_tokens(tokens: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for token in tokens:
-        if token in seen:
-            continue
-        output.append(token)
-        seen.add(token)
-    return output
-
-
-def find_metadata_parent_token(token: str, metadata_person_tokens: list[str]) -> str | None:
-    normalized = normalize_alias(token)
-    if len(normalized) <= 1:
-        return None
-    candidates = [
-        parent
-        for parent in metadata_person_tokens
-        if parent != token and normalized in normalize_alias(parent)
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda parent: len(normalize_alias(parent)))
-
-
-def derived_name_aliases(token: str) -> list[str]:
-    aliases: list[str] = []
-    kanji_match = re.fullmatch(r"[一-龥々]{4,5}", token)
-    if kanji_match:
-        aliases.append(token[:2])
-        aliases.append(token[2:])
-    mixed_match = re.fullmatch(r"([一-龥々]{1,4})([ァ-ヶー]{2,8})", token)
-    if mixed_match:
-        aliases.extend([mixed_match.group(1), mixed_match.group(2)])
-    return [alias for alias in unique_ordered_tokens(aliases) if alias and alias != token]
-
-
-def candidate_reason(source_kinds: set[str], generic: bool) -> str:
-    if generic:
-        return "一般語または番組・企画名寄りの表現として自動除外"
-    has_metadata = bool({"metadata_title", "metadata_description"} & source_kinds)
-    if has_metadata and "comment" in source_kinds:
-        return "タイトル・概要欄とコメント内の両方から候補化"
-    if "metadata_title" in source_kinds:
-        return "タイトルの列挙から候補化"
-    if "metadata_description" in source_kinds:
-        return "タイトル・概要欄・ハッシュタグの列挙から候補化"
-    return "コメント内の頻出表記から候補化"
-
-
-def guess_entity_type(token: str) -> str:
-    if any(word in token.lower() for word in ["tv", "channel", "チャンネル"]):
-        return "channel"
-    if any(word in token for word in ["コンビ", "組"]):
-        return "duo"
-    return "person"
-
-
-def alias_matches(normalized_comment: str, normalized_alias_value: str) -> bool:
-    if not normalized_alias_value:
-        return False
-    if len(normalized_alias_value) <= 2:
-        return bool(re.search(rf"(?<![a-z0-9]){re.escape(normalized_alias_value)}(さん|ちゃん|くん|君|氏|様)?", normalized_comment))
-    return normalized_alias_value in normalized_comment
