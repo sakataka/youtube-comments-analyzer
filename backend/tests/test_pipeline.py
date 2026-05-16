@@ -91,6 +91,9 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("category_counts", report["appeal_summary"]["people"][0])
             self.assertIn("tone_counts", report["appeal_summary"]["people"][0])
             self.assertIn("evidence_comments", report["appeal_summary"]["people"][0])
+            self.assertEqual(report["sections"]["cooccurrence"]["status"], "available")
+            self.assertIn("pairs", report["cooccurrence"])
+            self.assertIn("matrix", report["cooccurrence"])
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)

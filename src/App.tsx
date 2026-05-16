@@ -159,6 +159,21 @@ type AppealPersonSummary = {
   negative_note?: string | null;
 };
 
+type CooccurrencePair = {
+  person_a_id: string;
+  person_a_name: string;
+  person_b_id: string;
+  person_b_name: string;
+  cooccurrence_comment_count: number;
+  like_weighted_score: number;
+  relationship_category: string;
+  representative_comments: Array<{
+    comment_id: string;
+    text_original: string;
+    like_count: number;
+  }>;
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -190,6 +205,13 @@ type Report = {
   appeal_summary: {
     people: AppealPersonSummary[];
   };
+  cooccurrence: {
+    pairs: CooccurrencePair[];
+    matrix: Array<{
+      source: string;
+      targets: Array<{ target: string; count: number }>;
+    }>;
+  };
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -204,7 +226,7 @@ type Report = {
   }>;
 };
 
-type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "comments";
+type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "cooccurrence" | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -781,6 +803,14 @@ export default function App() {
             disabled={!report}
           >
             人物詳細
+          </button>
+          <button
+            type="button"
+            className={activeTab === "cooccurrence" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("cooccurrence")}
+            disabled={!report}
+          >
+            関係性
           </button>
           <button
             type="button"
@@ -1367,6 +1397,61 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {report && activeTab === "cooccurrence" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>共起・関係性分析</h2>
+              <p>同じコメント内で複数人物が言及された組み合わせを集計します。</p>
+            </div>
+            <strong>{report.cooccurrence.pairs.length} 組</strong>
+          </div>
+          <div className="cooccurrence-layout">
+            <div className="cooccurrence-list">
+              {report.cooccurrence.pairs.slice(0, 20).map((pair) => (
+                <article className="cooccurrence-card" key={`${pair.person_a_id}-${pair.person_b_id}`}>
+                  <div>
+                    <h3>
+                      {pair.person_a_name} × {pair.person_b_name}
+                    </h3>
+                    <p>
+                      {pair.cooccurrence_comment_count} 件 / weighted {pair.like_weighted_score.toFixed(2)}
+                    </p>
+                  </div>
+                  <span className="status status-available">{pair.relationship_category}</span>
+                  {pair.representative_comments.map((comment) => (
+                    <blockquote key={comment.comment_id}>
+                      {comment.text_original}
+                      <small>{comment.like_count} likes</small>
+                    </blockquote>
+                  ))}
+                </article>
+              ))}
+              {report.cooccurrence.pairs.length === 0 ? <p className="list-note">共起はまだありません。</p> : null}
+            </div>
+            <aside className="cooccurrence-matrix">
+              <h3>ヒートマップ</h3>
+              {report.cooccurrence.matrix.slice(0, 8).map((row) => (
+                <div className="matrix-row" key={row.source}>
+                  <strong>{row.source}</strong>
+                  <div>
+                    {row.targets.slice(0, 8).map((target) => (
+                      <span
+                        key={`${row.source}-${target.target}`}
+                        title={`${row.source} × ${target.target}: ${target.count}`}
+                        style={{ opacity: target.count ? Math.min(1, 0.25 + target.count / 20) : 0.18 }}
+                      >
+                        {target.count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </aside>
           </div>
         </section>
       ) : null}

@@ -997,6 +997,81 @@ h4 {
   gap: 12px;
 }
 
+.cooccurrence-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.cooccurrence-list {
+  display: grid;
+  gap: 12px;
+}
+
+.cooccurrence-card {
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.cooccurrence-card h3 {
+  font-size: 18px;
+}
+
+.cooccurrence-card p {
+  color: #647181;
+  line-height: 1.55;
+  margin: 4px 0 0;
+}
+
+.cooccurrence-card small {
+  color: #697789;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.cooccurrence-matrix {
+  align-content: start;
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.matrix-row {
+  display: grid;
+  gap: 6px;
+}
+
+.matrix-row strong {
+  color: #435264;
+  font-size: 12px;
+}
+
+.matrix-row div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.matrix-row span {
+  align-items: center;
+  background: #175ddc;
+  border-radius: 4px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+}
+
 .ranking-row {
   border: 1px solid #dfe6ef;
   border-radius: 8px;
@@ -1139,6 +1214,7 @@ blockquote {
   .llm-assist-grid,
   .frequent-review-board,
   .appeal-grid,
+  .cooccurrence-layout,
   .report-layout,
   .detail-layout,
   .comment-toolbar,

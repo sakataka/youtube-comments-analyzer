@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from itertools import combinations
 from typing import Any
 
 
@@ -201,6 +202,101 @@ def negative_note_text(negative_count: int, total_count: int) -> str | None:
     return f"negative 判定が {negative_count} 件あります。過度に強調せず、代表コメントで文脈確認してください。"
 
 
+def build_cooccurrence(mentions: list[Any]) -> dict[str, Any]:
+    comments: dict[str, dict[str, Any]] = {}
+    for mention in mentions:
+        comment = comments.setdefault(
+            mention["comment_id"],
+            {
+                "comment_id": mention["comment_id"],
+                "text_original": mention["text_original"],
+                "like_count": int(mention["like_count"]),
+                "persons": {},
+            },
+        )
+        comment["persons"][mention["person_id"]] = mention["display_name"]
+
+    pairs: dict[tuple[str, str], dict[str, Any]] = {}
+    for comment in comments.values():
+        person_items = sorted(comment["persons"].items(), key=lambda item: item[1])
+        for left, right in combinations(person_items, 2):
+            key = tuple(sorted([left[0], right[0]]))
+            pair = pairs.setdefault(
+                key,
+                {
+                    "person_a_id": key[0],
+                    "person_b_id": key[1],
+                    "person_a_name": comment["persons"][key[0]],
+                    "person_b_name": comment["persons"][key[1]],
+                    "comment_ids": set(),
+                    "like_weighted_score": 0.0,
+                    "representative_comments": [],
+                    "category_votes": defaultdict(int),
+                },
+            )
+            if comment["comment_id"] in pair["comment_ids"]:
+                continue
+            pair["comment_ids"].add(comment["comment_id"])
+            pair["like_weighted_score"] += 1 + math.log1p(max(0, int(comment["like_count"])))
+            pair["representative_comments"].append({
+                "comment_id": comment["comment_id"],
+                "text_original": comment["text_original"],
+                "like_count": comment["like_count"],
+            })
+            pair["category_votes"][relationship_category(comment["text_original"])] += 1
+
+    pair_rows = []
+    for pair in pairs.values():
+        representative_comments = sorted(pair["representative_comments"], key=lambda item: item["like_count"], reverse=True)[:3]
+        category = max(pair["category_votes"].items(), key=lambda item: item[1])[0]
+        pair_rows.append({
+            "person_a_id": pair["person_a_id"],
+            "person_a_name": pair["person_a_name"],
+            "person_b_id": pair["person_b_id"],
+            "person_b_name": pair["person_b_name"],
+            "cooccurrence_comment_count": len(pair["comment_ids"]),
+            "like_weighted_score": round(pair["like_weighted_score"], 4),
+            "relationship_category": category,
+            "representative_comments": representative_comments,
+        })
+    pair_rows.sort(key=lambda row: (row["cooccurrence_comment_count"], row["like_weighted_score"]), reverse=True)
+    return {
+        "pairs": pair_rows,
+        "matrix": build_cooccurrence_matrix(pair_rows),
+    }
+
+
+def relationship_category(text: str) -> str:
+    if any(keyword in text for keyword in ["ツッコミ", "ボケ", "絡み", "掛け合", "コンビ"]):
+        return "掛け合い"
+    if any(keyword in text for keyword in ["助け", "フォロー", "優し", "支え", "尊敬"]):
+        return "支え合い"
+    if any(keyword in text for keyword in ["似て", "同じ", "対照", "バランス", "違い"]):
+        return "比較"
+    return "同時言及"
+
+
+def build_cooccurrence_matrix(pair_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    names = sorted({row["person_a_name"] for row in pair_rows} | {row["person_b_name"] for row in pair_rows})
+    counts = {
+        (row["person_a_name"], row["person_b_name"]): row["cooccurrence_comment_count"]
+        for row in pair_rows
+    }
+    return [
+        {
+            "source": source,
+            "targets": [
+                {
+                    "target": target,
+                    "count": 0 if source == target else counts.get((source, target), counts.get((target, source), 0)),
+                }
+                for target in names
+            ],
+        }
+        for source in names
+    ]
+
+
 def build_report_payload(
     run_id: str,
     video: Any,
@@ -214,6 +310,7 @@ def build_report_payload(
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
     appeal_summary = build_appeal_summary(mentions)
+    cooccurrence = build_cooccurrence(mentions)
     llm_section = llm_section_status(llm_assist)
     return {
         "schema_version": "report.v1",
@@ -247,6 +344,7 @@ def build_report_payload(
         "alias_suggestions": alias_suggestions,
         "llm_assist": llm_assist,
         "appeal_summary": appeal_summary,
+        "cooccurrence": cooccurrence,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -274,7 +372,7 @@ def build_report_payload(
                 if llm_section["status"] == "failed"
                 else {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"}
             ),
-            "cooccurrence": {"status": "skipped", "reason": "MVP-2 scope"},
+            "cooccurrence": {"status": "available"},
             "clusters": {"status": "skipped", "reason": "Embeddings disabled in MVP-0"},
         },
     }
