@@ -119,6 +119,7 @@ export default function App() {
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
+  const [selectedDetailPersonId, setSelectedDetailPersonId] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -152,6 +153,32 @@ export default function App() {
       return matchesText && matchesPerson;
     });
   }, [commentPersonFilter, commentSearch, report]);
+
+  const selectedDetailPerson = useMemo(() => {
+    if (!report?.rankings.mention_ranking.length) return null;
+    return (
+      report.rankings.mention_ranking.find((row) => row.person_id === selectedDetailPersonId) ??
+      report.rankings.mention_ranking[0]
+    );
+  }, [report, selectedDetailPersonId]);
+
+  const selectedPersonDetails = useMemo(() => {
+    if (!report || !selectedDetailPerson) return null;
+    const person = report.persons.find((item) => item.person_id === selectedDetailPerson.person_id);
+    const comments = report.comments
+      .filter((comment) => comment.mentioned_persons.some((mentioned) => mentioned.person_id === selectedDetailPerson.person_id))
+      .sort((a, b) => b.like_count - a.like_count);
+    const aliases = person?.aliases.filter((alias) => alias.status === "accepted") ?? [];
+    return {
+      person,
+      comments,
+      aliases,
+      featureWords: extractFeatureWords(
+        comments.map((comment) => comment.text_original),
+        [selectedDetailPerson.display_name, ...aliases.map((alias) => alias.alias_text)]
+      )
+    };
+  }, [report, selectedDetailPerson]);
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
@@ -514,6 +541,76 @@ export default function App() {
         </section>
       ) : null}
 
+      {report && selectedDetailPerson && selectedPersonDetails ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>人物別詳細</h2>
+              <p>人物ごとの集計表記、特徴語、根拠コメントを確認します。</p>
+            </div>
+          </div>
+          <div className="detail-layout">
+            <aside className="person-selector">
+              {report.rankings.mention_ranking.map((row) => (
+                <button
+                  className={row.person_id === selectedDetailPerson.person_id ? "person-selector__item person-selector__item--active" : "person-selector__item"}
+                  key={row.person_id}
+                  type="button"
+                  onClick={() => setSelectedDetailPersonId(row.person_id)}
+                >
+                  <span>{row.display_name}</span>
+                  <strong>{row.mention_comment_count}件</strong>
+                </button>
+              ))}
+            </aside>
+            <div className="person-detail">
+              <div className="person-detail__summary">
+                <div>
+                  <h3>{selectedDetailPerson.display_name}</h3>
+                  <p>
+                    {selectedDetailPerson.mention_comment_count}件 / {(selectedDetailPerson.mention_rate * 100).toFixed(1)}% / weighted{" "}
+                    {selectedDetailPerson.like_weighted_score.toFixed(2)}
+                  </p>
+                </div>
+                <strong>{selectedPersonDetails.comments.length} コメント</strong>
+              </div>
+              <div className="detail-block">
+                <h4>集計表記</h4>
+                <div className="mention-pills detail-pills">
+                  {selectedPersonDetails.aliases.map((alias) => (
+                    <span key={alias.alias_id}>{alias.alias_text}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="detail-block">
+                <h4>特徴語</h4>
+                <div className="feature-list">
+                  {selectedPersonDetails.featureWords.map((word) => (
+                    <span key={word.term}>
+                      {word.term}
+                      <strong>{word.count}</strong>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="detail-block">
+                <h4>代表コメント</h4>
+                <div className="comment-list">
+                  {selectedPersonDetails.comments.slice(0, 8).map((comment) => (
+                    <article className="comment-row" key={comment.comment_id}>
+                      <div className="comment-row__meta">
+                        <strong>{comment.like_count} likes</strong>
+                      </div>
+                      <p>{comment.text_original}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {report ? (
         <section className="panel">
           <div className="section-heading">
@@ -648,4 +745,22 @@ function aliasSourceLabel(source: string): string {
   if (source.includes("comment")) return "コメント頻度から検出";
   if (source === "user") return "手動追加";
   return source;
+}
+
+function extractFeatureWords(texts: string[], excludedTerms: string[]): Array<{ term: string; count: number }> {
+  const excluded = new Set(excludedTerms.map((term) => normalizeSearch(term)).filter(Boolean));
+  const stopwords = new Set(["さん", "ちゃん", "くん", "これ", "それ", "動画", "コメント", "ところ", "感じ", "今回"]);
+  const counts = new Map<string, number>();
+  for (const text of texts) {
+    const tokens = text.match(/[一-龥々ぁ-んァ-ヶーA-Za-z0-9]{2,16}/g) ?? [];
+    for (const token of tokens) {
+      const normalized = normalizeSearch(token);
+      if (excluded.has(normalized) || stopwords.has(normalized) || normalized.length < 2) continue;
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([term, count]) => ({ term, count }));
 }

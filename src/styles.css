@@ -149,7 +149,8 @@ select {
 }
 
 h2,
-h3 {
+h3,
+h4 {
   letter-spacing: 0;
   margin: 0;
 }
@@ -350,6 +351,88 @@ h3 {
   grid-template-columns: minmax(0, 1fr) 280px;
 }
 
+.detail-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.person-selector {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.person-selector__item {
+  align-items: center;
+  background: #f4f7fb;
+  color: #263340;
+  display: flex;
+  justify-content: space-between;
+  min-height: 44px;
+  text-align: left;
+}
+
+.person-selector__item--active {
+  background: #175ddc;
+  color: #fff;
+}
+
+.person-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.person-detail__summary {
+  align-items: center;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.person-detail__summary p {
+  color: #647181;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+
+.detail-block {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-pills {
+  justify-content: flex-start;
+}
+
+.feature-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feature-list span {
+  align-items: center;
+  background: #fff7e5;
+  border: 1px solid #f0d49b;
+  border-radius: 999px;
+  color: #6d4a00;
+  display: inline-flex;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.feature-list strong {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
 .ranking-list {
   display: grid;
   gap: 12px;
@@ -483,6 +566,7 @@ blockquote {
   .hero,
   .status-panel,
   .report-layout,
+  .detail-layout,
   .comment-toolbar,
   .comment-assign {
     grid-template-columns: 1fr;
