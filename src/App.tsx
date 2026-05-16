@@ -1151,7 +1151,7 @@ export default function App() {
                           {alias.representative_comments.map((comment) => (
                             <blockquote key={comment.comment_id}>
                               {comment.text_original}
-                              <small>{comment.like_count} likes</small>
+                              <LikeCount count={comment.like_count} />
                             </blockquote>
                           ))}
                         </details>
@@ -1535,7 +1535,7 @@ export default function App() {
                     {selectedPersonDetails.appeal.evidence_comments.slice(0, 3).map((comment) => (
                       <article className="comment-row" key={comment.comment_id}>
                         <div className="comment-row__meta">
-                          <strong>{comment.like_count} likes</strong>
+                          <LikeCount count={comment.like_count} strong />
                         </div>
                         <p>{comment.text_original}</p>
                       </article>
@@ -1557,7 +1557,7 @@ export default function App() {
                   {selectedPersonDetails.comments.slice(0, 8).map((comment) => (
                     <article className="comment-row" key={comment.comment_id}>
                       <div className="comment-row__meta">
-                        <strong>{comment.like_count} likes</strong>
+                        <LikeCount count={comment.like_count} strong />
                       </div>
                       <p>{comment.text_original}</p>
                     </article>
@@ -1594,7 +1594,7 @@ export default function App() {
                   {pair.representative_comments.map((comment) => (
                     <blockquote key={comment.comment_id}>
                       {comment.text_original}
-                      <small>{comment.like_count} likes</small>
+                      <LikeCount count={comment.like_count} />
                     </blockquote>
                   ))}
                 </article>
@@ -1660,7 +1660,7 @@ export default function App() {
                 {cluster.representative_comments.slice(0, 3).map((comment) => (
                   <blockquote key={comment.comment_id}>
                     {comment.text_original}
-                    <small>{comment.like_count} likes</small>
+                    <LikeCount count={comment.like_count} />
                   </blockquote>
                 ))}
               </article>
@@ -1704,7 +1704,7 @@ export default function App() {
             {filteredComments.slice(0, 200).map((comment) => (
               <article className="comment-row" key={comment.comment_id}>
                 <div className="comment-row__meta">
-                  <strong>{comment.like_count} likes</strong>
+                  <LikeCount count={comment.like_count} strong />
                   {comment.is_reply ? <span className="reply-badge">返信</span> : null}
                   <div className="mention-pills">
                     {comment.mentioned_persons.length ? (
@@ -1841,9 +1841,10 @@ function FrequentAliasColumn({
               {suggestion.representative_comments.map((comment) => (
                 <blockquote key={comment.comment_id}>
                   {comment.text_original}
-                  <small>
-                    {comment.like_count} likes{comment.is_reply ? " / 返信" : ""}
-                  </small>
+                  <span className="alias-evidence-meta">
+                    <LikeCount count={comment.like_count} />
+                    {comment.is_reply ? " / 返信" : ""}
+                  </span>
                 </blockquote>
               ))}
             </details>
@@ -1854,6 +1855,16 @@ function FrequentAliasColumn({
       )}
     </div>
   );
+}
+
+function LikeCount({ count, strong = false }: { count: number; strong?: boolean }) {
+  const content = (
+    <>
+      <span aria-hidden="true">👍</span>
+      <span>{count.toLocaleString("ja-JP")}</span>
+    </>
+  );
+  return strong ? <strong className="like-count">{content}</strong> : <small className="like-count">{content}</small>;
 }
 
 function statusLabel(status: string): string {

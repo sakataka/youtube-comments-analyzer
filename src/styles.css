@@ -613,12 +613,23 @@ h4 {
   margin-top: 8px;
 }
 
-.alias-evidence small {
+.alias-evidence small,
+.alias-evidence-meta {
   color: #697789;
   display: block;
   font-size: 11px;
   font-weight: 800;
   margin-top: 4px;
+}
+
+.like-count {
+  align-items: center;
+  color: #697789;
+  display: inline-flex;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .alias-suggestion-grid {
