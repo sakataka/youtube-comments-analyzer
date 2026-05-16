@@ -47,6 +47,10 @@ class CandidateActionsRequest(BaseModel):
     actions: list[dict[str, Any]]
 
 
+class CommentActionsRequest(BaseModel):
+    actions: list[dict[str, Any]]
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -111,6 +115,14 @@ def candidate_actions(run_id: str, request: CandidateActionsRequest) -> dict[str
         store.get_run_row(run_id)
         store.apply_candidate_actions(run_id, request.actions)
         return {"status": "ok"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/comment-actions")
+def comment_actions(run_id: str, request: CommentActionsRequest) -> dict[str, Any]:
+    try:
+        return store.apply_comment_actions(run_id, request.actions)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

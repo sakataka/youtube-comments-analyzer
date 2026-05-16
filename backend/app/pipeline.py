@@ -185,6 +185,14 @@ def init_db(conn: sqlite3.Connection) -> None:
           payload_json text not null,
           created_at text not null
         );
+        create table if not exists comment_mention_overrides (
+          id text primary key,
+          analysis_run_id text not null,
+          comment_id text not null,
+          person_id text not null,
+          action_type text not null,
+          created_at text not null
+        );
         """
     )
     conn.commit()
@@ -541,6 +549,7 @@ class AnalysisStore:
                             json.dumps({"comment_id": comment["id"], "alias": alias["alias_text"]}, ensure_ascii=False),
                         ),
                     )
+        self.apply_comment_mention_overrides(run_id)
         report = self.build_report(run_id)
         self.conn.execute(
             "insert into reports values (?, ?, ?, ?)",
@@ -554,6 +563,62 @@ class AnalysisStore:
         self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
         self._write_run_artifact(run_id, "report.json", report)
         return report
+
+    def apply_comment_actions(self, run_id: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
+        self.get_run_row(run_id)
+        for action in actions:
+            action_type = action["type"]
+            if action_type not in {"add_mention", "remove_mention"}:
+                continue
+            comment_id = action["comment_id"]
+            person_id = action["person_id"]
+            self.conn.execute(
+                "insert into comment_mention_overrides values (?, ?, ?, ?, ?, ?)",
+                (new_id("override"), run_id, comment_id, person_id, action_type, utc_now()),
+            )
+        self.apply_comment_mention_overrides(run_id)
+        report = self.build_report(run_id)
+        self.conn.execute(
+            "insert into reports values (?, ?, ?, ?)",
+            (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
+        )
+        self.conn.commit()
+        self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
+        self._write_run_artifact(run_id, "report.json", report)
+        return report
+
+    def apply_comment_mention_overrides(self, run_id: str) -> None:
+        overrides = self.conn.execute(
+            "select * from comment_mention_overrides where analysis_run_id = ? order by created_at asc",
+            (run_id,),
+        ).fetchall()
+        for override in overrides:
+            if override["action_type"] == "remove_mention":
+                self.conn.execute(
+                    "delete from comment_mentions where analysis_run_id = ? and comment_id = ? and person_id = ?",
+                    (run_id, override["comment_id"], override["person_id"]),
+                )
+            elif override["action_type"] == "add_mention":
+                existing = self.conn.execute(
+                    "select id from comment_mentions where analysis_run_id = ? and comment_id = ? and person_id = ?",
+                    (run_id, override["comment_id"], override["person_id"]),
+                ).fetchone()
+                if existing:
+                    continue
+                self.conn.execute(
+                    "insert into comment_mentions values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        new_id("mention"),
+                        run_id,
+                        override["comment_id"],
+                        override["person_id"],
+                        None,
+                        "manual",
+                        "manual_override",
+                        1.0,
+                        json.dumps({"comment_id": override["comment_id"], "source": "manual_override"}, ensure_ascii=False),
+                    ),
+                )
 
     def build_report(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)

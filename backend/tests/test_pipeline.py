@@ -70,6 +70,20 @@ class PipelineTest(unittest.TestCase):
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)
+            target_comment = mentioned_comments[0]
+            target_person = target_comment["mentioned_persons"][0]
+            updated_report = store.apply_comment_actions(
+                run_id,
+                [
+                    {
+                        "type": "remove_mention",
+                        "comment_id": target_comment["comment_id"],
+                        "person_id": target_person["person_id"],
+                    }
+                ],
+            )
+            updated_comment = next(comment for comment in updated_report["comments"] if comment["comment_id"] == target_comment["comment_id"])
+            self.assertNotIn(target_person["person_id"], {person["person_id"] for person in updated_comment["mentioned_persons"]})
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
 
 

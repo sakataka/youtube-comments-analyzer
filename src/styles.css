@@ -422,19 +422,37 @@ blockquote {
 }
 
 .mention-pills span {
+  align-items: center;
   background: #e8f1ff;
   border: 1px solid #bfd6ff;
   border-radius: 999px;
   color: #154c9f;
+  display: inline-flex;
+  gap: 6px;
   font-size: 12px;
   font-weight: 800;
   padding: 4px 8px;
+}
+
+.mention-pills button {
+  background: transparent;
+  color: inherit;
+  min-height: 0;
+  padding: 0;
+  text-decoration: underline;
 }
 
 .mention-pills .mention-pills__empty {
   background: #f1f4f8;
   border-color: #d7dfe9;
   color: #5d6b7b;
+}
+
+.comment-assign {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 280px) auto;
+  justify-content: start;
 }
 
 .list-note {
@@ -446,7 +464,8 @@ blockquote {
   .hero,
   .status-panel,
   .report-layout,
-  .comment-toolbar {
+  .comment-toolbar,
+  .comment-assign {
     grid-template-columns: 1fr;
   }
 

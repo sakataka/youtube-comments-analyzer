@@ -70,6 +70,7 @@ type Report = {
   rankings: {
     mention_ranking: RankingRow[];
   };
+  persons: Person[];
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -108,6 +109,7 @@ export default function App() {
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
+  const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,6 +125,10 @@ export default function App() {
 
   const commentPersonOptions = useMemo(() => {
     return report?.rankings.mention_ranking.map((row) => ({ person_id: row.person_id, display_name: row.display_name })) ?? [];
+  }, [report]);
+
+  const assignablePersons = useMemo(() => {
+    return report?.persons.filter((person) => person.status === "accepted") ?? [];
   }, [report]);
 
   const filteredComments = useMemo(() => {
@@ -221,6 +227,25 @@ export default function App() {
       const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
       setRun(state);
       setReport(nextReport);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateCommentMention(action: { type: "add_mention" | "remove_mention"; comment_id: string; person_id: string }) {
+    if (!run) return;
+    setBusy(true);
+    setLastAction(null);
+    setError(null);
+    try {
+      const nextReport = await api<Report>(`/api/runs/${run.run_id}/comment-actions`, {
+        method: "POST",
+        body: JSON.stringify({ actions: [action] })
+      });
+      setReport(nextReport);
+      setLastAction(action.type === "add_mention" ? "コメントに人物を追加しました" : "コメントから人物を外しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -497,13 +522,58 @@ export default function App() {
                   <strong>{comment.like_count} likes</strong>
                   <div className="mention-pills">
                     {comment.mentioned_persons.length ? (
-                      comment.mentioned_persons.map((person) => <span key={person.person_id}>{person.display_name}</span>)
+                      comment.mentioned_persons.map((person) => (
+                        <span key={person.person_id}>
+                          {person.display_name}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              updateCommentMention({
+                                type: "remove_mention",
+                                comment_id: comment.comment_id,
+                                person_id: person.person_id
+                              })
+                            }
+                          >
+                            外す
+                          </button>
+                        </span>
+                      ))
                     ) : (
                       <span className="mention-pills__empty">未紐づけ</span>
                     )}
                   </div>
                 </div>
                 <p>{comment.text_original}</p>
+                <div className="comment-assign">
+                  <select
+                    value={commentPersonDrafts[comment.comment_id] ?? ""}
+                    onChange={(event) =>
+                      setCommentPersonDrafts((drafts) => ({ ...drafts, [comment.comment_id]: event.target.value }))
+                    }
+                  >
+                    <option value="">人物を選択</option>
+                    {assignablePersons.map((person) => (
+                      <option key={person.person_id} value={person.person_id}>
+                        {person.display_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={busy || !(commentPersonDrafts[comment.comment_id] ?? "")}
+                    onClick={() =>
+                      updateCommentMention({
+                        type: "add_mention",
+                        comment_id: comment.comment_id,
+                        person_id: commentPersonDrafts[comment.comment_id]
+                      })
+                    }
+                  >
+                    この人物に紐づけ
+                  </button>
+                </div>
               </article>
             ))}
           </div>
