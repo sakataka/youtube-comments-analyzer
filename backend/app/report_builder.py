@@ -96,6 +96,7 @@ def build_report_payload(
     llm_assist: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
+    llm_section = llm_section_status(llm_assist)
     return {
         "schema_version": "report.v1",
         "run_id": run_id,
@@ -147,10 +148,22 @@ def build_report_payload(
             "person_candidates": {"status": "available"},
             "alias_suggestions": {"status": "available"},
             "raw_comments": {"status": "available"},
-            "llm_assist": {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "Not run yet"},
+            "llm_assist": llm_section,
             "appeal_summary": {"status": "skipped", "reason": "MVP-1 later scope"},
-            "ambiguous_classification": {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"},
+            "ambiguous_classification": (
+                llm_section
+                if llm_section["status"] == "failed"
+                else {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"}
+            ),
             "cooccurrence": {"status": "skipped", "reason": "MVP-2 scope"},
             "clusters": {"status": "skipped", "reason": "Embeddings disabled in MVP-0"},
         },
     }
+
+
+def llm_section_status(llm_assist: dict[str, Any] | None) -> dict[str, str | None]:
+    if not llm_assist:
+        return {"status": "skipped", "reason": "Not run yet"}
+    if llm_assist.get("status") == "failed":
+        return {"status": "failed", "reason": llm_assist.get("error_message") or "LLM assist failed"}
+    return {"status": "available", "reason": None}

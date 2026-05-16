@@ -27,6 +27,26 @@ SUGGESTION_STOPWORDS = {
     "今回",
     "動画",
     "コメント",
+    "すぎる",
+    "すぎて",
+    "めっちゃ",
+    "ってる",
+    "してる",
+    "だった",
+    "ったら",
+    "なの",
+    "として",
+    "からの",
+    "でした",
+    "がいい",
+    "みたいな",
+    "らしい",
+    "デビュー",
+    "グループ",
+    "ゲーム",
+    "コロナ",
+    "ティッシュ",
+    "ドローミー",
 }
 
 
@@ -115,7 +135,7 @@ def extract_nickname_like_tokens(text: str) -> list[str]:
     for match in NICKNAME_TOKEN_RE.finditer(text):
         token = match.group(0).strip()
         token = re.sub(r"(さん|ちゃん|くん|君)$", "", token)
-        token = re.sub(r"[はがもにをでと]$", "", token)
+        token = re.sub(r"[はがもにをでとの]$", "", token)
         if token:
             output.append(token)
     return output
@@ -131,6 +151,10 @@ def should_suggest_alias_token(normalized_token: str, token: str, known_aliases:
     if is_generic_candidate(token):
         return False
     if re.search(r"\d", normalized_token):
+        return False
+    if re.fullmatch(r"[ぁ-んー]+", normalized_token) and len(normalized_token) <= 2:
+        return False
+    if re.fullmatch(r"[ぁ-んー]+", normalized_token) and len(normalized_token) >= 5:
         return False
     return True
 

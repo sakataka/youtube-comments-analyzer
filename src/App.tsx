@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from "react";
 
 type RunState = {
   run_id: string;
@@ -115,6 +115,8 @@ type LlmAssist = {
   provider: string;
   source: string;
   input_hash: string;
+  status?: string;
+  error_message?: string;
   candidate_recommendations: Array<{
     display_name: string;
     recommendation: string;
@@ -179,6 +181,7 @@ type Report = {
 };
 
 type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "comments";
+type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -211,6 +214,7 @@ export default function App() {
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [aliasSuggestionDrafts, setAliasSuggestionDrafts] = useState<Record<string, string>>({});
   const [ignoredAliasSuggestions, setIgnoredAliasSuggestions] = useState<Record<string, boolean>>({});
+  const [aliasSuggestionReview, setAliasSuggestionReview] = useState<Record<string, AliasReviewState>>({});
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
@@ -240,6 +244,19 @@ export default function App() {
   const visibleAliasSuggestions = useMemo(() => {
     return (report?.alias_suggestions ?? []).filter((suggestion) => !ignoredAliasSuggestions[suggestion.normalized_alias]);
   }, [ignoredAliasSuggestions, report]);
+
+  const frequentReviewGroups = useMemo(() => {
+    const suggestions = visibleAliasSuggestions.map((suggestion) => ({
+      suggestion,
+      reviewState: aliasSuggestionReview[suggestion.normalized_alias] ?? defaultAliasReviewState(suggestion)
+    }));
+    return {
+      personCandidates: report?.persons.filter((person) => person.status !== "rejected") ?? [],
+      aliasCandidates: suggestions.filter((item) => item.reviewState === "alias_candidate"),
+      needsReview: suggestions.filter((item) => item.reviewState === "needs_review"),
+      commonWords: suggestions.filter((item) => item.reviewState === "common_word")
+    };
+  }, [aliasSuggestionReview, report, visibleAliasSuggestions]);
 
   const filteredComments = useMemo(() => {
     const query = normalizeSearch(commentSearch);
@@ -500,6 +517,10 @@ export default function App() {
       setCandidates(nextCandidates);
       setReport(nextReport);
       setIgnoredAliasSuggestions((ignored) => ({ ...ignored, [suggestion.normalized_alias]: true }));
+      setAliasSuggestionReview((reviews) => {
+        const { [suggestion.normalized_alias]: _removed, ...rest } = reviews;
+        return rest;
+      });
       setLastAction(`表記「${suggestion.token}」を alias に追加しました`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -514,15 +535,23 @@ export default function App() {
     setLastAction(null);
     setError(null);
     try {
-      await api<LlmAssist>(`/api/runs/${run.run_id}/llm-assist`, { method: "POST" });
+      const result = await api<LlmAssist>(`/api/runs/${run.run_id}/llm-assist`, { method: "POST" });
       const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
       setReport(nextReport);
-      setLastAction("LLM 補助分析を更新しました");
+      setLastAction(result.status === "failed" ? "LLM 補助だけ失敗しました。通常レポートは有効です。" : "LLM 補助分析を更新しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLlmBusy(false);
     }
+  }
+
+  function setAliasReviewState(suggestion: AliasSuggestion, reviewState: AliasReviewState) {
+    setAliasSuggestionReview((reviews) => ({
+      ...reviews,
+      [suggestion.normalized_alias]: reviewState
+    }));
+    setLastAction(`「${suggestion.token}」を ${aliasReviewStateLabel(reviewState)} に分類しました`);
   }
 
   return (
@@ -717,7 +746,7 @@ export default function App() {
             onClick={() => setActiveTab("aliases")}
             disabled={!report}
           >
-            未知alias
+            頻出語レビュー
           </button>
           <button
             type="button"
@@ -1072,7 +1101,14 @@ export default function App() {
             </button>
           </div>
           {report.llm_assist ? (
-            <div className="llm-assist-grid">
+            report.llm_assist.status === "failed" ? (
+              <div className="degraded-box">
+                <strong>LLM 補助分析だけ失敗しました</strong>
+                <p>候補抽出、alias、ランキング、コメント紐づけの通常レポートは有効です。</p>
+                <small>{report.llm_assist.error_message || report.sections.llm_assist?.reason || "原因未取得"}</small>
+              </div>
+            ) : (
+              <div className="llm-assist-grid">
               <div>
                 <h3>候補整理</h3>
                 {report.llm_assist.candidate_recommendations.length ? (
@@ -1122,6 +1158,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            )
           ) : (
             <p className="list-note">まだ LLM 補助分析は実行していません。</p>
           )}
@@ -1132,77 +1169,73 @@ export default function App() {
         <section className="panel">
           <div className="section-heading">
             <div>
-              <h2>未知 alias 候補</h2>
-              <p>既存 alias に入っていない、ニックネームらしい頻出表記です。人物に紐づけると再集計します。</p>
+              <h2>頻出語レビュー</h2>
+              <p>人物候補と、既存 alias に入っていない頻出表記を分類します。alias に採用すると再集計します。</p>
             </div>
-            <strong>{visibleAliasSuggestions.length} 件</strong>
+            <strong>{visibleAliasSuggestions.length + frequentReviewGroups.personCandidates.length} 件</strong>
           </div>
-          {visibleAliasSuggestions.length ? (
-            <div className="alias-suggestion-grid">
-              {visibleAliasSuggestions.map((suggestion) => (
-                <article className="alias-suggestion-card" key={suggestion.normalized_alias}>
-                  <div>
-                    <h3>{suggestion.token}</h3>
-                    <p>{suggestion.reason}</p>
-                    <strong>{suggestion.hit_count} 件</strong>
-                  </div>
-                  <label>
-                    紐づけ先
-                    <select
-                      value={aliasSuggestionDrafts[suggestion.normalized_alias] ?? suggestion.suggested_person_id ?? ""}
-                      onChange={(event) =>
-                        setAliasSuggestionDrafts((drafts) => ({
-                          ...drafts,
-                          [suggestion.normalized_alias]: event.target.value
-                        }))
-                      }
-                    >
-                      <option value="">人物を選択</option>
-                      {assignablePersons.map((person) => (
-                        <option key={person.person_id} value={person.person_id}>
-                          {person.display_name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="candidate-actions">
-                    <button
-                      type="button"
-                      disabled={busy || !(aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id)}
-                      onClick={() => acceptAliasSuggestion(suggestion)}
-                    >
-                      alias に追加
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        setIgnoredAliasSuggestions((ignored) => ({
-                          ...ignored,
-                          [suggestion.normalized_alias]: true
-                        }))
-                      }
-                    >
-                      今回は無視
-                    </button>
-                  </div>
-                  <details className="alias-evidence">
-                    <summary>代表コメント</summary>
-                    {suggestion.representative_comments.map((comment) => (
-                      <blockquote key={comment.comment_id}>
-                        {comment.text_original}
-                        <small>
-                          {comment.like_count} likes{comment.is_reply ? " / 返信" : ""}
-                        </small>
-                      </blockquote>
-                    ))}
-                  </details>
+          <div className="frequent-review-summary">
+            <button type="button" onClick={() => setActiveTab("candidates")}>
+              人物候補 {frequentReviewGroups.personCandidates.length}
+            </button>
+            <span>alias 候補 {frequentReviewGroups.aliasCandidates.length}</span>
+            <span>要確認 {frequentReviewGroups.needsReview.length}</span>
+            <span>一般語 {frequentReviewGroups.commonWords.length}</span>
+          </div>
+          <div className="frequent-review-board">
+            <div className="frequent-review-column">
+              <h3>人物候補</h3>
+              <p>人物そのものの採用・除外は候補確認で行います。</p>
+              {frequentReviewGroups.personCandidates.slice(0, 8).map((person) => (
+                <article className="frequent-word-card frequent-word-card--person" key={person.person_id}>
+                  <strong>{person.display_name}</strong>
+                  <small>
+                    {person.entity_type} / {statusLabel(person.status)} / {person.accepted_mention_comment_count} 件
+                  </small>
                 </article>
               ))}
+              {frequentReviewGroups.personCandidates.length > 8 ? (
+                <p className="list-note">ほか {frequentReviewGroups.personCandidates.length - 8} 件</p>
+              ) : null}
             </div>
-          ) : (
-            <p className="list-note">追加候補はありません。</p>
-          )}
+            <FrequentAliasColumn
+              title="alias 候補"
+              items={frequentReviewGroups.aliasCandidates}
+              busy={busy}
+              assignablePersons={assignablePersons}
+              aliasSuggestionDrafts={aliasSuggestionDrafts}
+              setAliasSuggestionDrafts={setAliasSuggestionDrafts}
+              acceptAliasSuggestion={acceptAliasSuggestion}
+              setAliasReviewState={setAliasReviewState}
+            />
+            <FrequentAliasColumn
+              title="要確認"
+              items={frequentReviewGroups.needsReview}
+              busy={busy}
+              assignablePersons={assignablePersons}
+              aliasSuggestionDrafts={aliasSuggestionDrafts}
+              setAliasSuggestionDrafts={setAliasSuggestionDrafts}
+              acceptAliasSuggestion={acceptAliasSuggestion}
+              setAliasReviewState={setAliasReviewState}
+            />
+            <div className="frequent-review-column">
+              <h3>一般語</h3>
+              <p>集計対象にしない語です。必要なら要確認へ戻せます。</p>
+              {frequentReviewGroups.commonWords.length ? (
+                frequentReviewGroups.commonWords.map(({ suggestion }) => (
+                  <article className="frequent-word-card" key={suggestion.normalized_alias}>
+                    <strong>{suggestion.token}</strong>
+                    <small>{suggestion.hit_count} 件 / 集計から除外中</small>
+                    <button type="button" className="choice-button" onClick={() => setAliasReviewState(suggestion, "needs_review")}>
+                      要確認に戻す
+                    </button>
+                  </article>
+                ))
+              ) : (
+                <p className="list-note">分類済みの一般語はありません。</p>
+              )}
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -1374,6 +1407,92 @@ export default function App() {
   );
 }
 
+function FrequentAliasColumn({
+  title,
+  items,
+  busy,
+  assignablePersons,
+  aliasSuggestionDrafts,
+  setAliasSuggestionDrafts,
+  acceptAliasSuggestion,
+  setAliasReviewState
+}: {
+  title: string;
+  items: Array<{ suggestion: AliasSuggestion; reviewState: AliasReviewState }>;
+  busy: boolean;
+  assignablePersons: Person[];
+  aliasSuggestionDrafts: Record<string, string>;
+  setAliasSuggestionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  acceptAliasSuggestion: (suggestion: AliasSuggestion) => void;
+  setAliasReviewState: (suggestion: AliasSuggestion, reviewState: AliasReviewState) => void;
+}) {
+  return (
+    <div className="frequent-review-column">
+      <h3>{title}</h3>
+      <p>{title === "alias 候補" ? "人物への紐づけ候補です。" : "人物名か一般語かを確認します。"}</p>
+      {items.length ? (
+        items.map(({ suggestion, reviewState }) => (
+          <article className="alias-suggestion-card" key={suggestion.normalized_alias}>
+            <div>
+              <h4>{suggestion.token}</h4>
+              <p>{suggestion.reason}</p>
+              <strong>{suggestion.hit_count} 件</strong>
+              <span className={`status status-${reviewState}`}>{aliasReviewStateLabel(reviewState)}</span>
+            </div>
+            <label>
+              紐づけ先
+              <select
+                value={aliasSuggestionDrafts[suggestion.normalized_alias] ?? suggestion.suggested_person_id ?? ""}
+                onChange={(event) =>
+                  setAliasSuggestionDrafts((drafts) => ({
+                    ...drafts,
+                    [suggestion.normalized_alias]: event.target.value
+                  }))
+                }
+              >
+                <option value="">人物を選択</option>
+                {assignablePersons.map((person) => (
+                  <option key={person.person_id} value={person.person_id}>
+                    {person.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="candidate-actions">
+              <button
+                type="button"
+                disabled={busy || !(aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id)}
+                onClick={() => acceptAliasSuggestion(suggestion)}
+              >
+                alias に追加
+              </button>
+              <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "needs_review")}>
+                保留
+              </button>
+              <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "common_word")}>
+                一般語として除外
+              </button>
+            </div>
+            <details className="alias-evidence">
+              <summary>代表コメント</summary>
+              {suggestion.representative_comments.map((comment) => (
+                <blockquote key={comment.comment_id}>
+                  {comment.text_original}
+                  <small>
+                    {comment.like_count} likes{comment.is_reply ? " / 返信" : ""}
+                  </small>
+                </blockquote>
+              ))}
+            </details>
+          </article>
+        ))
+      ) : (
+        <p className="list-note">該当する表記はありません。</p>
+      )}
+    </div>
+  );
+}
+
 function statusLabel(status: string): string {
   if (status === "accepted") return "採用";
   if (status === "rejected") return "除外";
@@ -1451,6 +1570,47 @@ function aliasSourceLabel(source: string): string {
   if (source.includes("comment")) return "コメント頻度から検出";
   if (source === "user") return "手動追加";
   return source;
+}
+
+function aliasReviewStateLabel(state: AliasReviewState): string {
+  if (state === "alias_candidate") return "alias 候補";
+  if (state === "needs_review") return "要確認";
+  if (state === "common_word") return "一般語";
+  return state;
+}
+
+function defaultAliasReviewState(suggestion: AliasSuggestion): AliasReviewState {
+  const normalized = normalizeSearch(suggestion.normalized_alias || suggestion.token);
+  const commonTerms = new Set([
+    "すぎる",
+    "すぎて",
+    "めっちゃ",
+    "ってる",
+    "してる",
+    "だった",
+    "ったら",
+    "なの",
+    "として",
+    "からの",
+    "でした",
+    "がいい",
+    "みたいな",
+    "らしい",
+    "デビュー",
+    "グループ",
+    "ゲーム",
+    "コロナ",
+    "ティッシュ",
+    "ドローミー"
+  ]);
+  if (commonTerms.has(normalized)) return "common_word";
+  if (suggestion.suggested_person_name && normalized.includes(normalizeSearch(suggestion.suggested_person_name))) {
+    return "common_word";
+  }
+  if (/^[ぁ-んー]+$/.test(normalized) && normalized.length <= 2) return "common_word";
+  if (/^[ぁ-んー]+$/.test(normalized) && normalized.length >= 5) return "common_word";
+  if (/^[ぁ-んー]+$/.test(normalized)) return "needs_review";
+  return suggestion.suggested_person_id ? "alias_candidate" : "needs_review";
 }
 
 function extractFeatureWords(texts: string[], excludedTerms: string[]): Array<{ term: string; count: number }> {

@@ -322,6 +322,38 @@ class PipelineTest(unittest.TestCase):
         )
         self.assertEqual(parsed["schema_version"], "llm_assist.v1")
 
+    def test_llm_assist_failure_is_saved_as_degraded_report_section(self):
+        class FailingLlmClient:
+            def ask(self, prompt: str) -> str:
+                raise RuntimeError("codex app server timeout")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            bundle = client.fetch_video_bundle(
+                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+            )
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 20,
+                    "reply_fetch_mode": "none",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            store.classify_and_report(run_id)
+            result = store.run_llm_assist(run_id, client=FailingLlmClient())
+            report = store.build_report(run_id)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(report["sections"]["mention_ranking"]["status"], "available")
+            self.assertEqual(report["sections"]["llm_assist"]["status"], "failed")
+            self.assertIn("codex app server timeout", report["sections"]["llm_assist"]["reason"])
+
     def test_completed_agent_text_accepts_app_server_item_shapes(self):
         self.assertEqual(
             extract_completed_agent_text({"type": "agentMessage", "text": '{"ok": true}'}),

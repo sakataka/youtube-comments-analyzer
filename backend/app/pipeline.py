@@ -13,6 +13,7 @@ from .candidate_extraction import build_candidate_seeds, extract_candidate_token
 from .llm_assist import (
     CodexAppServerClient,
     LlmClient,
+    PROMPT_VERSION,
     build_llm_assist_prompt,
     llm_cache_key,
     parse_llm_assist_json,
@@ -29,6 +30,22 @@ def utc_now() -> str:
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "schema_version": "llm_assist.v1",
+        "prompt_version": PROMPT_VERSION,
+        "provider": "codex_app_server",
+        "source": "codex_app_server",
+        "input_hash": input_hash,
+        "status": "failed",
+        "error_message": str(exc),
+        "candidate_recommendations": [],
+        "alias_recommendations": [],
+        "ambiguous_comments": [],
+        "notes": [],
+    }
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -638,8 +655,15 @@ class AnalysisStore:
             return result
 
         active_client = client or CodexAppServerClient()
-        raw_text = active_client.ask(prompt)
-        parsed = parse_llm_assist_json(raw_text)
+        raw_text = None
+        try:
+            raw_text = active_client.ask(prompt)
+            parsed = parse_llm_assist_json(raw_text)
+        except Exception as exc:
+            result = build_failed_llm_assist(cache_key, exc)
+            self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="failed")
+            self._write_run_artifact(run_id, "llm_assist.json", result)
+            return result
         result = {**parsed, "source": "codex_app_server", "input_hash": cache_key}
         write_cached_llm_assist(cache_dir, cache_key, result)
         self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")

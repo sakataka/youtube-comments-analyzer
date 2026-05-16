@@ -466,6 +466,26 @@ h4 {
   color: #8a5b00;
 }
 
+.status-failed {
+  background: #ffe5e5;
+  color: #9a1c1c;
+}
+
+.status-alias_candidate {
+  background: #e8f1ff;
+  color: #154c9f;
+}
+
+.status-needs_review {
+  background: #fff4d6;
+  color: #8a5b00;
+}
+
+.status-common_word {
+  background: #e5e9ef;
+  color: #3f4c5a;
+}
+
 .alias-list {
   display: grid;
   gap: 8px;
@@ -547,6 +567,10 @@ h4 {
   margin-bottom: 4px;
 }
 
+.alias-suggestion-card h4 {
+  font-size: 20px;
+}
+
 .alias-suggestion-card p {
   color: #647181;
   line-height: 1.55;
@@ -583,6 +607,91 @@ h4 {
   color: #647181;
   line-height: 1.55;
   margin: 0;
+}
+
+.degraded-box {
+  background: #fff7e8;
+  border: 1px solid #f1c983;
+  border-radius: 8px;
+  color: #5f4200;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.degraded-box p,
+.degraded-box small {
+  line-height: 1.6;
+  margin: 0;
+}
+
+.frequent-review-summary {
+  align-items: center;
+  background: #f3f7fc;
+  border: 1px solid #d9e4f0;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px;
+}
+
+.frequent-review-summary button,
+.frequent-review-summary span {
+  background: #fff;
+  border: 1px solid #dce5ef;
+  border-radius: 999px;
+  color: #394858;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.frequent-review-summary button {
+  color: #154c9f;
+}
+
+.frequent-review-board {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.frequent-review-column {
+  align-content: start;
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.frequent-review-column > p {
+  color: #647181;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.frequent-word-card {
+  background: #fff;
+  border: 1px solid #e1e8f1;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.frequent-word-card small {
+  color: #647181;
+  line-height: 1.45;
+}
+
+.frequent-word-card--person {
+  border-left: 3px solid #175ddc;
 }
 
 .report-layout {
@@ -963,6 +1072,7 @@ blockquote {
   .dashboard-grid,
   .dashboard-charts,
   .llm-assist-grid,
+  .frequent-review-board,
   .report-layout,
   .detail-layout,
   .comment-toolbar,

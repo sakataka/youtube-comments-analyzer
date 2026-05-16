@@ -169,6 +169,13 @@ data/llm_cache/<input_hash>.json
 
 同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。
 Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
+LLM 補助だけが失敗した場合も、候補抽出・alias・ランキングの通常レポートは有効なまま残し、`sections.llm_assist.status` に `failed` と理由を保存します。
+
+## レビュー UI
+
+- `候補確認`: 人物候補ごとに、集計先の人物名と配下 alias を編集します。
+- `頻出語レビュー`: 未登録の頻出表記を `alias 候補` / `要確認` / `一般語` に分類し、人物 alias へ追加できます。
+- `コメント`: コメント単位で人物の追加・削除を行い、代表コメントだけでは拾えない言及を補正できます。
 
 ## 主な API
 
