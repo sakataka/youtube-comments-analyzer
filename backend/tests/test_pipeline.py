@@ -267,6 +267,52 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(reply_comment["parent_comment_id"], "top-1")
             self.assertTrue(reply_comment["mentioned_persons"])
 
+    def test_run_archive_and_delete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            bundle = client.fetch_video_bundle(
+                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                FetchConfig(max_comments=10, fetch_order="relevance", reply_fetch_mode="none"),
+            )
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 10,
+                    "reply_fetch_mode": "none",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            self.assertTrue((data_dir / "runs" / run_id / "raw_comments.jsonl").exists())
+            archived = store.archive_run(run_id)
+            self.assertEqual(archived["status"], "archived")
+            self.assertFalse((data_dir / "runs" / run_id).exists())
+            self.assertTrue((data_dir / "archive" / "runs" / run_id).exists())
+            self.assertNotIn(run_id, {row["run_id"] for row in store.list_runs()})
+            deleted = store.delete_run(run_id)
+            self.assertEqual(deleted["status"], "deleted")
+            self.assertFalse((data_dir / "archive" / "runs" / run_id).exists())
+
+    def test_youtube_cache_archive_and_delete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            cache_dir = data_dir / "youtube_cache" / "vlpLbiqNhLo"
+            cache_dir.mkdir(parents=True)
+            (cache_dir / "relevance_none_10.jsonl").write_text("{}", encoding="utf-8")
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            archived = store.archive_youtube_cache()
+            self.assertEqual(archived["status"], "archived")
+            self.assertFalse((data_dir / "youtube_cache").exists())
+            self.assertTrue(Path(archived["archive_path"]).exists())
+            (data_dir / "youtube_cache").mkdir()
+            (data_dir / "youtube_cache" / "tmp.jsonl").write_text("{}", encoding="utf-8")
+            deleted = store.delete_youtube_cache()
+            self.assertEqual(deleted["status"], "deleted")
+            self.assertFalse((data_dir / "youtube_cache").exists())
+
     def test_unknown_alias_suggestions(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -885,8 +886,63 @@ class AnalysisStore:
         }
 
     def list_runs(self) -> list[dict[str, Any]]:
-        rows = self.conn.execute("select * from analysis_runs order by created_at desc limit 50").fetchall()
+        rows = self.conn.execute("select * from analysis_runs where status != 'archived' order by created_at desc limit 50").fetchall()
         return [self.get_run(row["id"]) for row in rows]
+
+    def archive_run(self, run_id: str) -> dict[str, Any]:
+        self.get_run_row(run_id)
+        source = self.data_dir / "runs" / run_id
+        archive = self.data_dir / "archive" / "runs" / run_id
+        if source.exists():
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            if archive.exists():
+                shutil.rmtree(archive)
+            shutil.move(str(source), str(archive))
+        self.conn.execute(
+            "update analysis_runs set status = 'archived', stage = 'archived', completed_at = ? where id = ?",
+            (utc_now(), run_id),
+        )
+        self.conn.commit()
+        return {"status": "archived", "run_id": run_id, "archive_path": str(archive)}
+
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run_row(run_id)
+        snapshot_id = run["comment_snapshot_id"]
+        video_id = run["video_id"]
+        for table in [
+            "reports",
+            "comment_mentions",
+            "candidate_action_logs",
+            "comment_mention_overrides",
+            "llm_assists",
+            "aliases",
+            "persons",
+        ]:
+            self.conn.execute(f"delete from {table} where analysis_run_id = ?", (run_id,))
+        self.conn.execute("delete from analysis_runs where id = ?", (run_id,))
+        self.conn.execute("delete from comments where comment_snapshot_id = ?", (snapshot_id,))
+        self.conn.execute("delete from comment_snapshots where id = ?", (snapshot_id,))
+        self.conn.execute("delete from videos where id = ?", (video_id,))
+        self.conn.commit()
+        for path in [self.data_dir / "runs" / run_id, self.data_dir / "archive" / "runs" / run_id]:
+            if path.exists():
+                shutil.rmtree(path)
+        return {"status": "deleted", "run_id": run_id}
+
+    def archive_youtube_cache(self) -> dict[str, Any]:
+        source = self.data_dir / "youtube_cache"
+        archive = self.data_dir / "archive" / "youtube_cache" / utc_now().replace(":", "-")
+        if not source.exists():
+            return {"status": "skipped", "reason": "youtube_cache not found", "archive_path": str(archive)}
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(archive))
+        return {"status": "archived", "archive_path": str(archive)}
+
+    def delete_youtube_cache(self) -> dict[str, Any]:
+        source = self.data_dir / "youtube_cache"
+        if source.exists():
+            shutil.rmtree(source)
+        return {"status": "deleted", "path": str(source)}
 
     def comments_for_snapshot(self, snapshot_id: str) -> list[sqlite3.Row]:
         return self.conn.execute(

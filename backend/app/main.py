@@ -53,6 +53,11 @@ class CommentActionsRequest(BaseModel):
     actions: list[dict[str, Any]]
 
 
+class DataActionRequest(BaseModel):
+    action: Literal["archive_run", "delete_run", "archive_youtube_cache", "delete_youtube_cache"]
+    run_id: str | None = None
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -89,9 +94,30 @@ def data_summary() -> dict[str, Any]:
         "youtube_cache": directory_summary(youtube_cache),
         "runs": directory_summary(runs),
         "llm_cache": directory_summary(llm_cache),
+        "archive": directory_summary(DATA_DIR / "archive"),
         "total_bytes": directory_size(DATA_DIR),
         "run_count": len(store.list_runs()),
     }
+
+
+@app.post("/api/data/actions")
+def data_actions(request: DataActionRequest) -> dict[str, Any]:
+    try:
+        if request.action == "archive_run":
+            if not request.run_id:
+                raise HTTPException(status_code=400, detail="run_id is required")
+            return store.archive_run(request.run_id)
+        if request.action == "delete_run":
+            if not request.run_id:
+                raise HTTPException(status_code=400, detail="run_id is required")
+            return store.delete_run(request.run_id)
+        if request.action == "archive_youtube_cache":
+            return store.archive_youtube_cache()
+        if request.action == "delete_youtube_cache":
+            return store.delete_youtube_cache()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    raise HTTPException(status_code=400, detail=f"unknown action: {request.action}")
 
 
 @app.get("/api/runs/{run_id}/export")

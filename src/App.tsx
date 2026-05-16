@@ -40,6 +40,7 @@ type DataSummary = {
   youtube_cache: { path: string; bytes: number; file_count: number };
   runs: { path: string; bytes: number; file_count: number };
   llm_cache: { path: string; bytes: number; file_count: number };
+  archive: { path: string; bytes: number; file_count: number };
   total_bytes: number;
   run_count: number;
 };
@@ -497,6 +498,39 @@ export default function App() {
     window.open(`${API_BASE}/api/runs/${run.run_id}/export`, "_blank", "noopener,noreferrer");
   }
 
+  async function runDataAction(action: "archive_run" | "delete_run" | "archive_youtube_cache" | "delete_youtube_cache", runId?: string) {
+    const message =
+      action === "delete_run"
+        ? "この run を削除します。元に戻せません。"
+        : action === "archive_run"
+          ? "この run の artifact を退避し、一覧から外します。"
+          : action === "delete_youtube_cache"
+            ? "YouTube cache を削除します。次回同条件でも API 再取得が必要になります。"
+            : "YouTube cache を archive に退避します。";
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    setError(null);
+    setLastAction(null);
+    try {
+      await api("/api/data/actions", {
+        method: "POST",
+        body: JSON.stringify({ action, run_id: runId })
+      });
+      if (runId && run?.run_id === runId) {
+        setRun(null);
+        setCandidates(null);
+        setReport(null);
+      }
+      await refreshRunHistory();
+      await refreshOpsInfo();
+      setLastAction("データ管理操作を実行しました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function openRun(runId: string) {
     setBusy(true);
     setLastAction(null);
@@ -823,6 +857,12 @@ export default function App() {
                   <button type="button" onClick={() => openRun(historyRun.run_id)} disabled={busy}>
                     開く
                   </button>
+                  <button type="button" onClick={() => runDataAction("archive_run", historyRun.run_id)} disabled={busy}>
+                    退避
+                  </button>
+                  <button type="button" onClick={() => runDataAction("delete_run", historyRun.run_id)} disabled={busy}>
+                    削除
+                  </button>
                 </article>
               ))}
             </div>
@@ -908,11 +948,29 @@ export default function App() {
                   {formatBytes(dataSummary.llm_cache.bytes)} / {dataSummary.llm_cache.file_count} files
                 </span>
               </div>
+              <div>
+                <strong>Archive</strong>
+                <span>
+                  {formatBytes(dataSummary.archive.bytes)} / {dataSummary.archive.file_count} files
+                </span>
+              </div>
             </div>
           ) : null}
           <div className="ops-actions">
             <button type="button" onClick={openRunExport} disabled={!run}>
               現在の run を JSON export
+            </button>
+            <button type="button" onClick={() => runDataAction("archive_run", run?.run_id)} disabled={!run || busy}>
+              現在の run を退避
+            </button>
+            <button type="button" onClick={() => runDataAction("delete_run", run?.run_id)} disabled={!run || busy}>
+              現在の run を削除
+            </button>
+            <button type="button" onClick={() => runDataAction("archive_youtube_cache")} disabled={busy || !dataSummary?.youtube_cache.file_count}>
+              YouTube cache を退避
+            </button>
+            <button type="button" onClick={() => runDataAction("delete_youtube_cache")} disabled={busy || !dataSummary?.youtube_cache.file_count}>
+              YouTube cache を削除
             </button>
             <small>export は明示操作だけで実行します。通常 test は fixture を使い、live API test とは分けて扱います。</small>
           </div>
