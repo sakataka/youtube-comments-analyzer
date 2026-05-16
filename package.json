@@ -1,0 +1,23 @@
+{
+  "name": "youtube-comment-mention-analyzer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 0",
+    "test": "python3 -m unittest discover -s backend/tests"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  }
+}

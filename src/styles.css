@@ -1,0 +1,292 @@
+:root {
+  color: #172026;
+  background: #f6f8fb;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  background: #175ddc;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button + button {
+  background: #e8edf5;
+  color: #27313d;
+}
+
+.app-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 28px;
+  align-items: end;
+  padding: 28px 0 22px;
+}
+
+.hero h1 {
+  margin: 0 0 14px;
+  font-size: clamp(32px, 5vw, 58px);
+  line-height: 1.04;
+  letter-spacing: 0;
+}
+
+.hero p,
+.section-heading p,
+.candidate-card p,
+.ranking-row p {
+  color: #647181;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.start-form,
+.panel {
+  background: #fff;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(23, 32, 38, 0.08);
+}
+
+.start-form {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+label {
+  color: #384655;
+  display: grid;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 7px;
+}
+
+input {
+  border: 1px solid #cfd8e4;
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.panel {
+  margin-top: 18px;
+  padding: 20px;
+}
+
+.status-panel {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 180px;
+}
+
+.label {
+  color: #697789;
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.error-box {
+  background: #fff1f1;
+  border: 1px solid #ffc9c9;
+  border-radius: 8px;
+  color: #a01818;
+  margin-top: 14px;
+  padding: 14px 16px;
+}
+
+.section-heading {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+h2,
+h3 {
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.candidate-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.candidate-card {
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.candidate-card__header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.candidate-actions {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.status {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.status-accepted,
+.status-available {
+  background: #dff7e9;
+  color: #146c36;
+}
+
+.status-rejected,
+.status-skipped {
+  background: #eef2f7;
+  color: #5f6d7c;
+}
+
+.status-candidate,
+.status-pending {
+  background: #fff4d6;
+  color: #8a5b00;
+}
+
+.alias-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.alias-list li {
+  align-items: center;
+  background: #f8fafc;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(70px, 1fr) auto auto auto auto;
+  padding: 8px;
+}
+
+.alias-list button {
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.report-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.ranking-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ranking-row {
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  padding: 16px;
+}
+
+.rank-number {
+  align-items: center;
+  background: #172026;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 800;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+blockquote {
+  border-left: 3px solid #175ddc;
+  color: #344252;
+  margin: 12px 0 0;
+  padding: 4px 0 4px 12px;
+}
+
+.sections-box {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.sections-box div {
+  border-top: 1px solid #dfe6ef;
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+}
+
+.sections-box small {
+  color: #697789;
+}
+
+@media (max-width: 760px) {
+  .hero,
+  .status-panel,
+  .report-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .alias-list li {
+    grid-template-columns: 1fr 54px;
+  }
+}
