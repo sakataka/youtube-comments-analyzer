@@ -24,6 +24,9 @@ type Person = {
   status: string;
   confidence: number;
   reason: string;
+  accepted_alias_hit_total: number;
+  all_alias_hit_total: number;
+  accepted_mention_comment_count: number;
   aliases: Alias[];
 };
 
@@ -180,7 +183,7 @@ export default function App() {
     if (!aliasText) return;
     await updateCandidate(
       { type: "add_alias", person_id: person.person_id, alias_text: aliasText },
-      `${person.display_name} に alias「${aliasText}」を追加しました`
+      `${person.display_name} に表記「${aliasText}」を追加しました`
     );
     setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
   }
@@ -258,7 +261,7 @@ export default function App() {
           <div className="section-heading">
             <div>
               <h2>人物候補と alias</h2>
-              <p>短い alias や低頻度候補は保留にしています。採用済み alias だけで集計します。</p>
+              <p>人物ごとに、その人物として数える表記をまとめています。採用済み表記だけで集計します。</p>
             </div>
             <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
               候補を確定して集計
@@ -278,6 +281,10 @@ export default function App() {
                   <div>
                     <h3>{person.display_name}</h3>
                     <p>{person.reason}</p>
+                    <p className="candidate-total">
+                      集計対象表記 {person.aliases.filter((alias) => alias.status === "accepted").length} 件 / 集計コメント{" "}
+                      {person.accepted_mention_comment_count} 件
+                    </p>
                   </div>
                   <span className={`status status-${person.status}`}>{statusLabel(person.status)}</span>
                 </div>
@@ -307,9 +314,9 @@ export default function App() {
                     {updatingId === person.person_id ? "処理中" : person.status === "rejected" ? "除外済み" : "除外"}
                   </button>
                 </div>
-                <div className="alias-editor" aria-label={`${person.display_name} の表示名と alias 編集`}>
+                <div className="alias-editor" aria-label={`${person.display_name} の表示名と表記編集`}>
                   <label>
-                    表示名
+                    集計先の人物名
                     <div className="inline-edit">
                       <input
                         value={displayNameDrafts[person.person_id] ?? person.display_name}
@@ -331,7 +338,7 @@ export default function App() {
                     </div>
                   </label>
                   <label>
-                    alias をこの人物に追加
+                    この人物として数える表記を追加
                     <div className="inline-edit">
                       <input
                         placeholder="例: 立野 / 沙紀 / みりちゃん"
@@ -346,6 +353,7 @@ export default function App() {
                     </div>
                   </label>
                 </div>
+                <div className="alias-list-heading">この人物として数える表記</div>
                 <ul className="alias-list">
                   {person.aliases.map((alias) => (
                     <li key={alias.alias_id}>

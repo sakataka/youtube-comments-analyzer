@@ -216,6 +216,12 @@ h3 {
   justify-content: space-between;
 }
 
+.candidate-total {
+  color: #253241;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
 .candidate-actions {
   display: flex;
   gap: 8px;
@@ -240,6 +246,13 @@ h3 {
 
 .inline-edit button {
   min-width: 64px;
+}
+
+.alias-list-heading {
+  color: #4b5a6a;
+  font-size: 12px;
+  font-weight: 800;
+  margin: 0 0 8px;
 }
 
 .choice-button {

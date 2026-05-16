@@ -58,6 +58,10 @@ class PipelineTest(unittest.TestCase):
             self.assertGreater(len(candidates["persons"]), 0)
             by_name = {person["display_name"]: person for person in candidates["persons"]}
             self.assertEqual(by_name["みりちゃむ"]["status"], "accepted")
+            saki_aliases = {alias["alias_text"] for alias in by_name["立野沙紀"]["aliases"]}
+            self.assertIn("立野", saki_aliases)
+            self.assertIn("沙紀", saki_aliases)
+            self.assertNotIn("立野", by_name)
             if "バランス" in by_name:
                 self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)

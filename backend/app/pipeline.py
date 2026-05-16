@@ -34,6 +34,15 @@ GENERIC_TOKEN_STOPWORDS = {
     "ランキング",
     "リリイベ",
     "ノブロック",
+    "ゲスト",
+    "ドッキリ",
+    "シリーズ",
+    "リスト",
+    "リリースイベント",
+    "オンラインショップ",
+    "オンラインストア",
+    "ショップ",
+    "ストア",
     "NOBROCK",
     "YouTube",
     "youtube",
@@ -48,6 +57,14 @@ GENERIC_TOKEN_KEYWORDS = (
     "アイドル",
     "リリイベ",
     "ノブロック",
+    "ゲスト",
+    "ドッキリ",
+    "シリーズ",
+    "リスト",
+    "リリースイベント",
+    "オンライン",
+    "ショップ",
+    "ストア",
     "公式",
     "番組",
     "企画",
@@ -284,17 +301,17 @@ class AnalysisStore:
         representative_ids: dict[str, list[str]] = defaultdict(list)
 
         metadata_inputs = [
-            (title["title"], True),
-            (title["description"] or "", False),
+            (title["title"], True, "metadata_title"),
+            (title["description"] or "", False, "metadata_description"),
         ]
-        for text, include_loose_metadata in metadata_inputs:
+        for text, include_loose_metadata, source_kind in metadata_inputs:
             for token in extract_candidate_tokens(
                 text,
                 include_metadata_lists=True,
                 include_loose_metadata=include_loose_metadata,
             ):
                 frequencies[token] += 12
-                source_kinds[token].add("metadata")
+                source_kinds[token].add(source_kind)
 
         for comment in comments:
             seen_in_comment: set[str] = set()
@@ -307,14 +324,43 @@ class AnalysisStore:
                 if len(representative_ids[token]) < 3:
                     representative_ids[token].append(comment["id"])
 
-        for token, count in candidate_frequency_order(frequencies)[:24]:
+        inserted_persons: dict[str, str] = {}
+        metadata_person_tokens = [
+            token
+            for token in frequencies
+            if "metadata_title" in source_kinds[token]
+            and not is_generic_candidate(token)
+            and len(normalize_alias(token)) > 1
+        ]
+        ordered_tokens = unique_ordered_tokens([
+            *[token for token, _ in candidate_frequency_order(Counter({token: frequencies[token] for token in metadata_person_tokens}))],
+            *[token for token, _ in candidate_frequency_order(frequencies)],
+        ])
+
+        for token in ordered_tokens[:32]:
+            count = frequencies[token]
             normalized = normalize_alias(token)
             generic = is_generic_candidate(token)
-            from_metadata = "metadata" in source_kinds[token]
+            from_title_metadata = "metadata_title" in source_kinds[token]
+            from_description_metadata = "metadata_description" in source_kinds[token]
+            parent_token = find_metadata_parent_token(token, metadata_person_tokens)
+            if parent_token and parent_token in inserted_persons:
+                self._insert_alias(
+                    run_id=run_id,
+                    person_id=inserted_persons[parent_token],
+                    token=token,
+                    normalized=normalized,
+                    source="+".join(sorted(source_kinds[token])) or "comment",
+                    hit_count=count,
+                    confidence=min(0.88, 0.58 + count / 50),
+                    status="accepted",
+                    representative_ids=representative_ids[token],
+                )
+                continue
             if len(normalized) <= 1 or generic:
                 status = "rejected"
                 confidence = 0.2
-            elif from_metadata:
+            elif from_title_metadata:
                 status = "accepted"
                 confidence = min(0.95, 0.68 + count / 30)
             else:
@@ -355,6 +401,21 @@ class AnalysisStore:
                     json.dumps(representative_ids[token], ensure_ascii=False),
                 ),
             )
+            inserted_persons[token] = person_id
+            if from_title_metadata and status == "accepted":
+                for alias_token in derived_name_aliases(token):
+                    alias_normalized = normalize_alias(alias_token)
+                    self._insert_alias(
+                        run_id=run_id,
+                        person_id=person_id,
+                        token=alias_token,
+                        normalized=alias_normalized,
+                        source="name_part",
+                        hit_count=frequencies.get(alias_token, 0),
+                        confidence=0.72,
+                        status="accepted",
+                        representative_ids=representative_ids.get(alias_token, []),
+                    )
 
         self.conn.execute(
             "update analysis_runs set status = ?, stage = ?, progress = ? where id = ?",
@@ -362,6 +423,41 @@ class AnalysisStore:
         )
         self.conn.commit()
         self._write_run_artifact(run_id, "person_candidates.json", self.get_candidates(run_id))
+
+    def _insert_alias(
+        self,
+        run_id: str,
+        person_id: str,
+        token: str,
+        normalized: str,
+        source: str,
+        hit_count: int,
+        confidence: float,
+        status: str,
+        representative_ids: list[str],
+    ) -> None:
+        existing = self.conn.execute(
+            "select id from aliases where analysis_run_id = ? and person_id = ? and normalized_alias = ?",
+            (run_id, person_id, normalized),
+        ).fetchone()
+        if existing:
+            return
+        self.conn.execute(
+            "insert into aliases values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_id("alias"),
+                run_id,
+                person_id,
+                token,
+                normalized,
+                source,
+                hit_count,
+                confidence,
+                status,
+                1 if len(normalized) <= 2 else 0,
+                json.dumps(representative_ids, ensure_ascii=False),
+            ),
+        )
 
     def apply_candidate_actions(self, run_id: str, actions: list[dict[str, Any]]) -> None:
         for action in actions:
@@ -542,10 +638,20 @@ class AnalysisStore:
         }
 
     def get_candidates(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run_row(run_id)
+        comments = self.comments_for_snapshot(run["comment_snapshot_id"])
         persons = self.conn.execute("select * from persons where analysis_run_id = ? order by confidence desc", (run_id,)).fetchall()
         output = []
         for person in persons:
             aliases = self.conn.execute("select * from aliases where person_id = ? order by hit_count desc", (person["id"],)).fetchall()
+            accepted_alias_hit_total = sum(int(alias["hit_count"]) for alias in aliases if alias["status"] == "accepted")
+            all_alias_hit_total = sum(int(alias["hit_count"]) for alias in aliases)
+            accepted_aliases = [alias for alias in aliases if alias["status"] == "accepted" and person["status"] == "accepted"]
+            accepted_mention_comment_count = sum(
+                1
+                for comment in comments
+                if any(alias_matches(comment["text_normalized"], alias["normalized_alias"]) for alias in accepted_aliases)
+            )
             output.append({
                 "person_id": person["id"],
                 "display_name": person["display_name"],
@@ -553,6 +659,9 @@ class AnalysisStore:
                 "status": person["status"],
                 "confidence": person["confidence"],
                 "reason": person["reason"],
+                "accepted_alias_hit_total": accepted_alias_hit_total,
+                "all_alias_hit_total": all_alias_hit_total,
+                "accepted_mention_comment_count": accepted_mention_comment_count,
                 "aliases": [
                     {
                         "alias_id": alias["id"],
@@ -687,12 +796,52 @@ def candidate_frequency_order(frequencies: Counter[str]) -> list[tuple[str, int]
     return sorted(frequencies.items(), key=lambda item: (item[1], len(normalize_alias(item[0]))), reverse=True)
 
 
+def unique_ordered_tokens(tokens: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen:
+            continue
+        output.append(token)
+        seen.add(token)
+    return output
+
+
+def find_metadata_parent_token(token: str, metadata_person_tokens: list[str]) -> str | None:
+    normalized = normalize_alias(token)
+    if len(normalized) <= 1:
+        return None
+    candidates = [
+        parent
+        for parent in metadata_person_tokens
+        if parent != token and normalized in normalize_alias(parent)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda parent: len(normalize_alias(parent)))
+
+
+def derived_name_aliases(token: str) -> list[str]:
+    aliases: list[str] = []
+    kanji_match = re.fullmatch(r"[一-龥々]{4,5}", token)
+    if kanji_match:
+        aliases.append(token[:2])
+        aliases.append(token[2:])
+    mixed_match = re.fullmatch(r"([一-龥々]{1,4})([ァ-ヶー]{2,8})", token)
+    if mixed_match:
+        aliases.extend([mixed_match.group(1), mixed_match.group(2)])
+    return [alias for alias in unique_ordered_tokens(aliases) if alias and alias != token]
+
+
 def candidate_reason(source_kinds: set[str], generic: bool) -> str:
     if generic:
         return "一般語または番組・企画名寄りの表現として自動除外"
-    if "metadata" in source_kinds and "comment" in source_kinds:
+    has_metadata = bool({"metadata_title", "metadata_description"} & source_kinds)
+    if has_metadata and "comment" in source_kinds:
         return "タイトル・概要欄とコメント内の両方から候補化"
-    if "metadata" in source_kinds:
+    if "metadata_title" in source_kinds:
+        return "タイトルの列挙から候補化"
+    if "metadata_description" in source_kinds:
         return "タイトル・概要欄・ハッシュタグの列挙から候補化"
     return "コメント内の頻出表記から候補化"
 
