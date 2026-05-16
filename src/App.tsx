@@ -548,9 +548,10 @@ export default function App() {
             返信コメント
             <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
               <option value="none">トップレベルのみ</option>
-              <option value="inline_subset">API同梱分を含める</option>
-              <option value="full">返信を全件取得</option>
+              <option value="inline_subset">同梱返信だけ含める</option>
+              <option value="full">返信を追加取得して含める</option>
             </select>
+            <small className="field-note">{replyFetchModeDescription(replyFetchMode)}</small>
           </label>
           <label className="checkbox-label">
             <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
@@ -565,40 +566,49 @@ export default function App() {
 
       {error ? <div className="error-box">{error}</div> : null}
 
-      <section className="panel history-panel">
-        <div className="section-heading">
+      <details className="panel history-panel">
+        <summary>
           <div>
             <h2>過去分析</h2>
             <p>保存済み run を読み込みます。同じ取得条件のコメントは cache から再利用されます。</p>
           </div>
-          <button type="button" onClick={refreshRunHistory} disabled={busy}>
-            更新
-          </button>
-        </div>
-        {runHistory.length ? (
-          <div className="history-list">
-            {runHistory.map((historyRun) => (
-              <article className={historyRun.run_id === run?.run_id ? "history-card history-card--active" : "history-card"} key={historyRun.run_id}>
-                <div>
-                  <h3>{historyRun.video?.title || historyRun.video?.youtube_video_id || historyRun.run_id}</h3>
-                  <p>
-                    {historyRun.video?.channel_title || "チャンネル未取得"} / {formatDateTime(historyRun.created_at)}
-                  </p>
-                  <small>
-                    {sourceLabel(historyRun.fetch_summary?.source ?? "")} / {historyRun.fetch_summary?.max_comments_fetched ?? 0} 件 /{" "}
-                    {replyFetchModeLabel(historyRun.fetch_summary?.reply_fetch_mode ?? "none")}
-                  </small>
-                </div>
-                <button type="button" onClick={() => openRun(historyRun.run_id)} disabled={busy}>
-                  開く
-                </button>
-              </article>
-            ))}
+          <strong>{runHistory.length} 件</strong>
+        </summary>
+        <div className="history-panel__body">
+          <div className="section-heading">
+            <div>
+              <h3>保存済み run</h3>
+              <p>必要な run だけ開いて候補・レポートを復元します。</p>
+            </div>
+            <button type="button" onClick={refreshRunHistory} disabled={busy}>
+              更新
+            </button>
           </div>
-        ) : (
-          <p className="list-note">保存済み run はまだありません。</p>
-        )}
-      </section>
+          {runHistory.length ? (
+            <div className="history-list">
+              {runHistory.map((historyRun) => (
+                <article className={historyRun.run_id === run?.run_id ? "history-card history-card--active" : "history-card"} key={historyRun.run_id}>
+                  <div>
+                    <h3>{historyRun.video?.title || historyRun.video?.youtube_video_id || historyRun.run_id}</h3>
+                    <p>
+                      {historyRun.video?.channel_title || "チャンネル未取得"} / {formatDateTime(historyRun.created_at)}
+                    </p>
+                    <small>
+                      {sourceLabel(historyRun.fetch_summary?.source ?? "")} / {historyRun.fetch_summary?.max_comments_fetched ?? 0} 件 /{" "}
+                      {replyFetchModeLabel(historyRun.fetch_summary?.reply_fetch_mode ?? "none")}
+                    </small>
+                  </div>
+                  <button type="button" onClick={() => openRun(historyRun.run_id)} disabled={busy}>
+                    開く
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="list-note">保存済み run はまだありません。</p>
+          )}
+        </div>
+      </details>
 
       {run ? (
         <section className="panel status-panel">
@@ -1335,9 +1345,18 @@ function sourceNote(source: string): string {
 
 function replyFetchModeLabel(mode: string): string {
   if (mode === "none") return "トップレベルのみ";
-  if (mode === "inline_subset") return "API同梱返信を含む";
-  if (mode === "full") return "返信を全件取得";
+  if (mode === "inline_subset") return "同梱返信のみ";
+  if (mode === "full") return "返信を追加取得";
   return mode;
+}
+
+function replyFetchModeDescription(mode: string): string {
+  if (mode === "none") return "動画直下のトップレベルコメントだけを取得します。";
+  if (mode === "inline_subset") {
+    return "commentThreads.list のレスポンスに最初から同梱される一部返信だけを含めます。追加 API 呼び出しはありません。";
+  }
+  if (mode === "full") return "各トップレベルコメントの返信を comments.list で追加ページング取得します。返信数に応じて API quota を使います。";
+  return "";
 }
 
 function llmRecommendationLabel(value: string): string {
