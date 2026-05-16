@@ -13,6 +13,7 @@ type Alias = {
   alias_text: string;
   hit_count: number;
   confidence: number;
+  source: string;
   status: string;
   representative_comment_ids: string[];
 };
@@ -405,7 +406,10 @@ export default function App() {
                 <ul className="alias-list">
                   {person.aliases.map((alias) => (
                     <li key={alias.alias_id}>
-                      <span>{alias.alias_text}</span>
+                      <span>
+                        {alias.alias_text}
+                        <small>{aliasSourceLabel(alias.source)}</small>
+                      </span>
                       <span>{alias.hit_count}件</span>
                       <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
                       <button
@@ -414,11 +418,11 @@ export default function App() {
                         onClick={() =>
                           updateCandidate(
                             { type: "accept_alias", alias_id: alias.alias_id },
-                            `alias「${alias.alias_text}」を採用しました`
+                            `表記「${alias.alias_text}」を集計対象にしました`
                           )
                         }
                       >
-                        {updatingId === alias.alias_id ? "処理中" : alias.status === "accepted" ? "採用済み" : "採用"}
+                        {updatingId === alias.alias_id ? "処理中" : alias.status === "accepted" ? "集計中" : "集計に入れる"}
                       </button>
                       <button
                         className={alias.status === "rejected" ? "choice-button choice-button--rejected" : "choice-button"}
@@ -426,11 +430,11 @@ export default function App() {
                         onClick={() =>
                           updateCandidate(
                             { type: "reject_alias", alias_id: alias.alias_id },
-                            `alias「${alias.alias_text}」を除外しました`
+                            `表記「${alias.alias_text}」を集計から外しました`
                           )
                         }
                       >
-                        {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "除外済み" : "除外"}
+                        {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "外し済み" : "集計から外す"}
                       </button>
                     </li>
                   ))}
@@ -594,4 +598,14 @@ function statusLabel(status: string): string {
 
 function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function aliasSourceLabel(source: string): string {
+  if (source === "name_part") return "フルネームから自動追加";
+  if (source.includes("metadata_title") && source.includes("comment")) return "タイトルとコメントから検出";
+  if (source.includes("metadata_title")) return "タイトルから検出";
+  if (source.includes("metadata_description")) return "概要欄から検出";
+  if (source.includes("comment")) return "コメント頻度から検出";
+  if (source === "user") return "手動追加";
+  return source;
 }
