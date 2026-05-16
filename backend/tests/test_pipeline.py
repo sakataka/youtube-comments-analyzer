@@ -19,6 +19,16 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("風吹ケイ", tokens)
         self.assertIn("NOBROCK", tokens)
 
+    def test_metadata_list_token_extraction(self):
+        tokens = extract_candidate_tokens(
+            "DRAW ME（みりちゃむ・福留光帆・森脇梨々夏・風吹ケイ・立野沙紀・二瓶有加）",
+            include_metadata_lists=True,
+            include_loose_metadata=True,
+        )
+        self.assertIn("みりちゃむ", tokens)
+        self.assertIn("立野沙紀", tokens)
+        self.assertNotIn("DRAW", tokens)
+
     def test_alias_match(self):
         self.assertTrue(alias_matches("福留さんの空気がいい", "福留"))
         self.assertTrue(alias_matches("みりちゃむの返し", "みりちゃむ"))
@@ -46,6 +56,10 @@ class PipelineTest(unittest.TestCase):
             )
             candidates = store.get_candidates(run_id)
             self.assertGreater(len(candidates["persons"]), 0)
+            by_name = {person["display_name"]: person for person in candidates["persons"]}
+            self.assertEqual(by_name["みりちゃむ"]["status"], "accepted")
+            if "バランス" in by_name:
+                self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)
             self.assertEqual(report["schema_version"], "report.v1")
             self.assertEqual(report["sections"]["appeal_summary"]["status"], "skipped")

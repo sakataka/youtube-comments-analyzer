@@ -54,6 +54,10 @@ URL 入力
 - 候補確認 UI
 - action-based candidate API
 - 候補・alias の採用/除外
+- display name 編集 UI
+- alias 追加 UI
+- タイトル・概要欄・ハッシュタグの列挙からの候補抽出
+- 一般語・番組/企画名寄り候補の自動除外
 
 ### Phase 4: 分類・集計の一部
 
@@ -119,8 +123,7 @@ URL 入力
 - alias ごとの代表コメント本文表示
 - 表記ゆれ統合 UI
 - merge 操作
-- display name 編集 UI
-- add alias UI
+- コメント単位で「このコメントはこの人物に紐づける」を修正するレビュー UI
 - `person`, `group`, `duo` 以外の折りたたみ表示
 
 ### コメント取得
@@ -206,7 +209,7 @@ URL 入力
 優先順位は次の順です。
 
 1. コメント一覧・検索画面を追加する。
-2. 候補確認 UI に add alias / display name edit / merge を追加する。
+2. 候補確認 UI に merge とコメント単位の紐づけ修正を追加する。
 3. 取得エラーと cache 利用状況を UI に明示する。
 4. 人物別詳細画面で特徴語と代表コメントを表示する。
 5. LLM なしの MVP-0 を一度初期検証動画で人間確認し、alias 誤爆を修正する。

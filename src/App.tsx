@@ -97,6 +97,8 @@ export default function App() {
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
+  const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,7 +142,7 @@ export default function App() {
   }
 
   async function updateCandidate(
-    action: { type: string; person_id?: string; alias_id?: string },
+    action: { type: string; person_id?: string; alias_id?: string; alias_text?: string; display_name?: string },
     label: string
   ) {
     if (!run) return;
@@ -162,6 +164,25 @@ export default function App() {
       setBusy(false);
       setUpdatingId(null);
     }
+  }
+
+  async function updateDisplayName(person: Person) {
+    const displayName = (displayNameDrafts[person.person_id] ?? person.display_name).trim();
+    if (!displayName || displayName === person.display_name) return;
+    await updateCandidate(
+      { type: "update_display_name", person_id: person.person_id, display_name: displayName },
+      `${person.display_name} の表示名を ${displayName} に更新しました`
+    );
+  }
+
+  async function addAlias(person: Person) {
+    const aliasText = (aliasDrafts[person.person_id] ?? "").trim();
+    if (!aliasText) return;
+    await updateCandidate(
+      { type: "add_alias", person_id: person.person_id, alias_text: aliasText },
+      `${person.display_name} に alias「${aliasText}」を追加しました`
+    );
+    setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
   }
 
   async function continueRun() {
@@ -285,6 +306,45 @@ export default function App() {
                   >
                     {updatingId === person.person_id ? "処理中" : person.status === "rejected" ? "除外済み" : "除外"}
                   </button>
+                </div>
+                <div className="alias-editor" aria-label={`${person.display_name} の表示名と alias 編集`}>
+                  <label>
+                    表示名
+                    <div className="inline-edit">
+                      <input
+                        value={displayNameDrafts[person.person_id] ?? person.display_name}
+                        onChange={(event) =>
+                          setDisplayNameDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          !(displayNameDrafts[person.person_id] ?? person.display_name).trim() ||
+                          (displayNameDrafts[person.person_id] ?? person.display_name).trim() === person.display_name
+                        }
+                        onClick={() => updateDisplayName(person)}
+                      >
+                        更新
+                      </button>
+                    </div>
+                  </label>
+                  <label>
+                    alias をこの人物に追加
+                    <div className="inline-edit">
+                      <input
+                        placeholder="例: 立野 / 沙紀 / みりちゃん"
+                        value={aliasDrafts[person.person_id] ?? ""}
+                        onChange={(event) =>
+                          setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
+                        }
+                      />
+                      <button type="button" disabled={busy || !(aliasDrafts[person.person_id] ?? "").trim()} onClick={() => addAlias(person)}>
+                        追加
+                      </button>
+                    </div>
+                  </label>
                 </div>
                 <ul className="alias-list">
                   {person.aliases.map((alias) => (

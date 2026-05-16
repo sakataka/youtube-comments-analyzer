@@ -13,17 +13,45 @@ from typing import Any
 from .text import normalize_alias, normalize_text
 
 
-HONORIFIC_RE = re.compile(r"([一-龥ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
+HONORIFIC_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
 KATAKANA_RE = re.compile(r"[ァ-ヶー]{3,16}")
-KANJI_KATAKANA_RE = re.compile(r"[一-龥]{1,8}[ァ-ヶー]{2,12}")
-HASHTAG_RE = re.compile(r"#([一-龥ぁ-んァ-ヶA-Za-z0-9_ー]{2,24})")
+KANJI_KATAKANA_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
+HASHTAG_RE = re.compile(r"#([一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24})")
+BRACKET_CONTENT_RE = re.compile(r"[【\[\(（]([^】\]\)）]{2,160})[】\]\)）]")
+METADATA_TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24}")
+METADATA_SPLIT_RE = re.compile(r"[、,／/・\s]+")
 GENERIC_TOKEN_STOPWORDS = {
     "コメント",
     "リアクション",
     "バランス",
     "チャンネル",
     "サンプル",
+    "バラエティ",
+    "トーク",
+    "メンバー",
+    "エピソード",
+    "アイドル",
+    "ランキング",
+    "リリイベ",
+    "ノブロック",
+    "NOBROCK",
+    "YouTube",
+    "youtube",
 }
+GENERIC_TOKEN_KEYWORDS = (
+    "コメント",
+    "チャンネル",
+    "バラエティ",
+    "ランキング",
+    "エピソード",
+    "メンバー",
+    "アイドル",
+    "リリイベ",
+    "ノブロック",
+    "公式",
+    "番組",
+    "企画",
+)
 
 
 def utc_now() -> str:
@@ -252,11 +280,21 @@ class AnalysisStore:
         comments = self.comments_for_snapshot(run["comment_snapshot_id"])
         title = self.conn.execute("select title, description from videos where id = ?", (run["video_id"],)).fetchone()
         frequencies: Counter[str] = Counter()
+        source_kinds: dict[str, set[str]] = defaultdict(set)
         representative_ids: dict[str, list[str]] = defaultdict(list)
 
-        for text in [title["title"], title["description"] or ""]:
-            for token in extract_candidate_tokens(text):
-                frequencies[token] += 2
+        metadata_inputs = [
+            (title["title"], True),
+            (title["description"] or "", False),
+        ]
+        for text, include_loose_metadata in metadata_inputs:
+            for token in extract_candidate_tokens(
+                text,
+                include_metadata_lists=True,
+                include_loose_metadata=include_loose_metadata,
+            ):
+                frequencies[token] += 12
+                source_kinds[token].add("metadata")
 
         for comment in comments:
             seen_in_comment: set[str] = set()
@@ -264,21 +302,27 @@ class AnalysisStore:
                 normalized = normalize_alias(token)
                 if normalized not in seen_in_comment:
                     frequencies[token] += 1
+                    source_kinds[token].add("comment")
                     seen_in_comment.add(normalized)
                 if len(representative_ids[token]) < 3:
                     representative_ids[token].append(comment["id"])
 
-        for token, count in frequencies.most_common(18):
+        for token, count in candidate_frequency_order(frequencies)[:24]:
             normalized = normalize_alias(token)
-            if len(normalized) <= 1:
+            generic = is_generic_candidate(token)
+            from_metadata = "metadata" in source_kinds[token]
+            if len(normalized) <= 1 or generic:
                 status = "rejected"
                 confidence = 0.2
-            elif count >= 2:
+            elif from_metadata:
                 status = "accepted"
-                confidence = min(0.95, 0.5 + count / 20)
+                confidence = min(0.95, 0.68 + count / 30)
             else:
                 status = "candidate"
-                confidence = 0.45
+                confidence = min(0.7, 0.38 + count / 40)
+            alias_status = "accepted" if status == "accepted" else "pending"
+            if status == "rejected":
+                alias_status = "rejected"
             person_id = new_id("person")
             alias_id = new_id("alias")
             self.conn.execute(
@@ -291,7 +335,7 @@ class AnalysisStore:
                     guess_entity_type(token),
                     status,
                     confidence,
-                    "タイトル・概要欄・コメント内の頻出表記から候補化",
+                    candidate_reason(source_kinds[token], generic),
                     "rule",
                 ),
             )
@@ -303,10 +347,10 @@ class AnalysisStore:
                     person_id,
                     token,
                     normalized,
-                    "comment_frequency",
+                    "+".join(sorted(source_kinds[token])) or "comment",
                     count,
                     confidence,
-                    "accepted" if status == "accepted" else "pending",
+                    alias_status,
                     1 if len(normalized) <= 2 else 0,
                     json.dumps(representative_ids[token], ensure_ascii=False),
                 ),
@@ -577,7 +621,11 @@ class AnalysisStore:
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def extract_candidate_tokens(text: str) -> list[str]:
+def extract_candidate_tokens(
+    text: str,
+    include_metadata_lists: bool = False,
+    include_loose_metadata: bool = False,
+) -> list[str]:
     if not text:
         return []
     tokens: list[str] = []
@@ -585,22 +633,68 @@ def extract_candidate_tokens(text: str) -> list[str]:
     tokens.extend(match.group(0) for match in KANJI_KATAKANA_RE.finditer(text))
     tokens.extend(match.group(0) for match in KATAKANA_RE.finditer(text))
     tokens.extend(match.group(1) for match in HASHTAG_RE.finditer(text))
+    if include_metadata_lists:
+        tokens.extend(extract_metadata_list_tokens(text, include_loose_metadata))
     cleaned: list[str] = []
     seen: set[str] = set()
     for token in tokens:
         cleaned_token = clean_candidate_token(token)
-        if not cleaned_token or cleaned_token in GENERIC_TOKEN_STOPWORDS or cleaned_token in seen:
+        if not cleaned_token or cleaned_token in seen:
             continue
         cleaned.append(cleaned_token)
         seen.add(cleaned_token)
     return cleaned
 
 
+def extract_metadata_list_tokens(text: str, include_loose_metadata: bool = False) -> list[str]:
+    candidates: list[str] = []
+    for match in BRACKET_CONTENT_RE.finditer(text):
+        content = match.group(1)
+        for part in METADATA_SPLIT_RE.split(content):
+            candidates.extend(token for token in METADATA_TOKEN_RE.findall(part) if contains_japanese(token))
+    for hashtag in HASHTAG_RE.finditer(text):
+        candidates.append(hashtag.group(1))
+    if include_loose_metadata:
+        for part in METADATA_SPLIT_RE.split(text):
+            candidates.extend(
+                token
+                for token in METADATA_TOKEN_RE.findall(part)
+                if contains_japanese(token) and 3 <= len(token) <= 12
+            )
+    return candidates
+
+
 def clean_candidate_token(token: str) -> str:
     token = token.strip()
-    token = re.split(r"[とてもはがのにをで、。・\s]+", token)[-1]
-    token = re.sub(r"[、。・]+$", "", token)
+    token = re.split(r"[、。・／/\s]+", token)[-1]
+    token = re.sub(r"^[とてもはがのにをで]+", "", token)
+    token = re.sub(r"[、。・／/]+$", "", token)
     return token
+
+
+def is_generic_candidate(token: str) -> bool:
+    normalized_stopwords = {normalize_alias(word) for word in GENERIC_TOKEN_STOPWORDS}
+    if token in GENERIC_TOKEN_STOPWORDS or normalize_alias(token) in normalized_stopwords:
+        return True
+    return any(keyword in token for keyword in GENERIC_TOKEN_KEYWORDS)
+
+
+def contains_japanese(token: str) -> bool:
+    return bool(re.search(r"[一-龥々ぁ-んァ-ヶ]", token))
+
+
+def candidate_frequency_order(frequencies: Counter[str]) -> list[tuple[str, int]]:
+    return sorted(frequencies.items(), key=lambda item: (item[1], len(normalize_alias(item[0]))), reverse=True)
+
+
+def candidate_reason(source_kinds: set[str], generic: bool) -> str:
+    if generic:
+        return "一般語または番組・企画名寄りの表現として自動除外"
+    if "metadata" in source_kinds and "comment" in source_kinds:
+        return "タイトル・概要欄とコメント内の両方から候補化"
+    if "metadata" in source_kinds:
+        return "タイトル・概要欄・ハッシュタグの列挙から候補化"
+    return "コメント内の頻出表記から候補化"
 
 
 def guess_entity_type(token: str) -> str:

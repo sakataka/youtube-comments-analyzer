@@ -222,6 +222,26 @@ h3 {
   margin: 14px 0;
 }
 
+.alias-editor {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 12px;
+}
+
+.inline-edit {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.inline-edit button {
+  min-width: 64px;
+}
+
 .choice-button {
   background: #e8edf5;
   color: #27313d;
