@@ -178,6 +178,33 @@ def init_db(conn: sqlite3.Connection) -> None:
           raw_text text,
           created_at text not null
         );
+        create table if not exists llm_cache (
+          input_hash text primary key,
+          prompt_version text not null,
+          provider text not null,
+          result_json text not null,
+          raw_text text,
+          created_at text not null
+        );
+        create table if not exists appeal_labels (
+          id text primary key,
+          analysis_run_id text not null,
+          person_id text not null,
+          category text not null,
+          label text not null,
+          count integer not null,
+          representative_comment_ids_json text not null
+        );
+        create table if not exists clusters (
+          id text primary key,
+          analysis_run_id text not null,
+          cluster_id text not null,
+          label text not null,
+          comment_count integer not null,
+          top_keywords_json text not null,
+          representative_comments_json text not null,
+          summary text not null
+        );
         """
     )
     ensure_column(conn, "videos", "youtube_comment_count", "integer")
@@ -325,6 +352,7 @@ class AnalysisStore:
         self.conn.commit()
         self.extract_candidates(run_id)
         self._write_run_artifact(run_id, "raw_comments.jsonl", bundle["comments"], jsonl=True)
+        self._write_run_artifact(run_id, "normalized_comments.jsonl", self.normalized_comments_for_snapshot(snapshot_id), jsonl=True)
         return run_id
 
     def extract_candidates(self, run_id: str) -> None:
@@ -619,6 +647,7 @@ class AnalysisStore:
             "insert into reports values (?, ?, ?, ?)",
             (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
         )
+        self.save_report_sections(run_id, report)
         self.conn.execute(
             "update analysis_runs set status = ?, stage = ?, progress = ?, completed_at = ? where id = ?",
             ("completed", "completed", 1.0, utc_now(), run_id),
@@ -626,6 +655,9 @@ class AnalysisStore:
         self.conn.commit()
         self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
         self._write_run_artifact(run_id, "report.json", report)
+        self._write_run_artifact(run_id, "aliases.json", self.get_candidates(run_id)["persons"])
+        self._write_run_artifact(run_id, "clusters.json", report["clusters"])
+        self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
         return report
 
     def apply_comment_actions(self, run_id: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -646,9 +678,13 @@ class AnalysisStore:
             "insert into reports values (?, ?, ?, ?)",
             (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
         )
+        self.save_report_sections(run_id, report)
         self.conn.commit()
         self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
         self._write_run_artifact(run_id, "report.json", report)
+        self._write_run_artifact(run_id, "aliases.json", self.get_candidates(run_id)["persons"])
+        self._write_run_artifact(run_id, "clusters.json", report["clusters"])
+        self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
         return report
 
     def apply_comment_mention_overrides(self, run_id: str) -> None:
@@ -718,6 +754,7 @@ class AnalysisStore:
         cache_key = llm_cache_key(prompt)
         cache_dir = self.data_dir / "llm_cache"
         cached = read_cached_llm_assist(cache_dir, cache_key)
+        cached = cached or self.read_llm_cache(cache_key)
         if cached:
             result = {**cached, "source": "cache", "input_hash": cache_key}
             self.save_llm_assist(run_id, cache_key, result, raw_text=None, status="completed")
@@ -736,6 +773,7 @@ class AnalysisStore:
             return result
         result = {**parsed, "source": "codex_app_server", "input_hash": cache_key}
         write_cached_llm_assist(cache_dir, cache_key, result)
+        self.write_llm_cache(cache_key, result, raw_text)
         self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")
         self._write_run_artifact(run_id, "llm_assist.json", result)
         return result
@@ -757,6 +795,26 @@ class AnalysisStore:
                 result.get("prompt_version") or "",
                 result.get("provider") or "codex_app_server",
                 status,
+                json.dumps(result, ensure_ascii=False),
+                raw_text,
+                utc_now(),
+            ),
+        )
+        self.conn.commit()
+
+    def read_llm_cache(self, input_hash: str) -> dict[str, Any] | None:
+        row = self.conn.execute("select result_json from llm_cache where input_hash = ?", (input_hash,)).fetchone()
+        return json.loads(row["result_json"]) if row else None
+
+    def write_llm_cache(self, input_hash: str, result: dict[str, Any], raw_text: str | None) -> None:
+        self.conn.execute(
+            """
+            insert or replace into llm_cache values (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                input_hash,
+                result.get("prompt_version") or "",
+                result.get("provider") or "codex_app_server",
                 json.dumps(result, ensure_ascii=False),
                 raw_text,
                 utc_now(),
@@ -887,7 +945,17 @@ class AnalysisStore:
             report = None
         artifact_dir = self.data_dir / "runs" / run_id
         artifacts = {}
-        for name in ["raw_comments.jsonl", "person_candidates.json", "mentions.jsonl", "report.json", "llm_assist.json"]:
+        for name in [
+            "raw_comments.jsonl",
+            "normalized_comments.jsonl",
+            "person_candidates.json",
+            "aliases.json",
+            "mentions.jsonl",
+            "report.json",
+            "clusters.json",
+            "appeal_labels.json",
+            "llm_assist.json",
+        ]:
             path = artifact_dir / name
             if path.exists():
                 artifacts[name] = {"path": str(path), "bytes": path.stat().st_size}
@@ -928,6 +996,8 @@ class AnalysisStore:
             "candidate_action_logs",
             "comment_mention_overrides",
             "llm_assists",
+            "appeal_labels",
+            "clusters",
             "aliases",
             "persons",
         ]:
@@ -963,9 +1033,54 @@ class AnalysisStore:
             (snapshot_id,),
         ).fetchall()
 
+    def normalized_comments_for_snapshot(self, snapshot_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "comment_id": comment["id"],
+                "youtube_comment_id": comment["youtube_comment_id"],
+                "text_original": comment["text_original"],
+                "text_normalized": comment["text_normalized"],
+                "is_reply": bool(comment["is_reply"]),
+                "parent_comment_id": comment["parent_comment_id"],
+            }
+            for comment in self.comments_for_snapshot(snapshot_id)
+        ]
+
     def get_mentions(self, run_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute("select * from comment_mentions where analysis_run_id = ?", (run_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    def save_report_sections(self, run_id: str, report: dict[str, Any]) -> None:
+        self.conn.execute("delete from appeal_labels where analysis_run_id = ?", (run_id,))
+        self.conn.execute("delete from clusters where analysis_run_id = ?", (run_id,))
+        for person in report.get("appeal_summary", {}).get("people", []):
+            for label in person.get("category_counts", []):
+                self.conn.execute(
+                    "insert into appeal_labels values (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        new_id("appeal"),
+                        run_id,
+                        person["person_id"],
+                        label["category"],
+                        label["label"],
+                        int(label["count"]),
+                        json.dumps(label.get("representative_comment_ids") or [], ensure_ascii=False),
+                    ),
+                )
+        for cluster in report.get("clusters", {}).get("clusters", []):
+            self.conn.execute(
+                "insert into clusters values (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_id("cluster"),
+                    run_id,
+                    cluster["cluster_id"],
+                    cluster["label"],
+                    int(cluster["comment_count"]),
+                    json.dumps(cluster.get("top_keywords") or [], ensure_ascii=False),
+                    json.dumps(cluster.get("representative_comments") or [], ensure_ascii=False),
+                    cluster.get("summary") or "",
+                ),
+            )
 
     def _write_run_artifact(self, run_id: str, filename: str, payload: Any, jsonl: bool = False) -> None:
         run_dir = self.data_dir / "runs" / run_id

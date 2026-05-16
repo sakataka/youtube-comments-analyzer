@@ -20,6 +20,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - 古い run を退避または削除する
 - YouTube cache を退避または削除する
 - 動画タイトル、チャンネル名、YouTube 表示コメント数、取得コメント数の差分を表示する
+- `POST /api/videos/inspect` で cache metadata を確認し、必要時だけ YouTube API で動画 metadata を取得する
 - 取得済みコメント内のいいね数分布を表示する
 - 概要ダッシュボードで採用人物数、紐づけ済みコメント数、トップ人物を確認する
 - 人物別言及数とコメント分類比率をグラフ表示する
@@ -52,6 +53,8 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - コメント一覧で本文検索、人物フィルタ、未紐づけ確認を行う
 - コメント一覧から人物紐づけの追加・解除を行い、ランキングに反映する
 - `report.v1` JSON を生成する
+- `appeal_labels` と `clusters` を DB に保存する
+- `normalized_comments.jsonl`、`aliases.json`、`clusters.json`、`appeal_labels.json` を run artifact として出力する
 
 ## 必要環境
 
@@ -171,9 +174,13 @@ cache metadata には、取得時点で YouTube API から得られた動画タ�
 ```text
 data/runs/<run_id>/
   raw_comments.jsonl
+  normalized_comments.jsonl
   person_candidates.json
+  aliases.json
   mentions.jsonl
   report.json
+  clusters.json
+  appeal_labels.json
   llm_assist.json
 ```
 
@@ -183,7 +190,7 @@ LLM 補助分析の結果は、prompt version と入力内容から作った has
 data/llm_cache/<input_hash>.json
 ```
 
-同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。
+同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。汎用 cache として `llm_cache` DB table にも保存し、既存 file cache は互換用に残します。
 Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
 LLM 補助だけが失敗した場合も、候補抽出・alias・ランキングの通常レポートは有効なまま残し、`sections.llm_assist.status` に `failed` と理由を保存します。
 

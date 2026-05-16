@@ -160,6 +160,29 @@ class YouTubeCommentClient:
         }
         return self._bundle(url, video_id, metadata, comments[: config.max_comments], "fixture")
 
+    def inspect_video(self, url: str, fetch_metadata: bool = False) -> dict[str, Any]:
+        video_id = parse_youtube_video_id(url)
+        if fetch_metadata:
+            api_key = os.getenv("YOUTUBE_API_KEY")
+            if not api_key:
+                raise RuntimeError("YOUTUBE_API_KEY が未設定のため metadata を取得できません")
+            metadata = self._fetch_video_metadata(api_key, url, video_id)
+            return {**metadata, "video_id": video_id, "metadata_source": "youtube_api"}
+        cache_root = self.cache_dir / video_id
+        metadata_files = sorted(cache_root.glob("*.metadata.json")) if cache_root.exists() else []
+        if metadata_files:
+            metadata = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+            return {**metadata, "video_id": video_id, "metadata_source": "cache"}
+        return {
+            "video_id": video_id,
+            "youtube_video_id": video_id,
+            "url": url,
+            "title": None,
+            "channel_title": None,
+            "comment_count_available": False,
+            "metadata_source": "none",
+        }
+
     def _fetch_live(self, api_key: str, url: str, video_id: str, config: FetchConfig) -> dict[str, Any]:
         video = self._fetch_video_metadata(api_key, url, video_id)
         comments: list[dict[str, Any]] = []

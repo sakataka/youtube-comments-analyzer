@@ -36,6 +36,7 @@ jobs: dict[str, dict[str, Any]] = {}
 
 class InspectRequest(BaseModel):
     url: str
+    fetch_metadata: bool = False
 
 
 class RunCreateRequest(BaseModel):
@@ -135,16 +136,11 @@ def export_run(run_id: str) -> dict[str, Any]:
 @app.post("/api/videos/inspect")
 def inspect_video(request: InspectRequest) -> dict[str, Any]:
     try:
-        video_id = parse_youtube_video_id(request.url)
+        return youtube_client.inspect_video(request.url, request.fetch_metadata)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "video_id": video_id,
-        "title": None,
-        "channel_title": None,
-        "comment_count_available": False,
-        "note": "MVP-0 inspect は API quota を消費しないため metadata fetch を行いません",
-    }
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/runs")

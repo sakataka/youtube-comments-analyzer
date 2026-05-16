@@ -24,6 +24,29 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("風吹ケイ", tokens)
         self.assertIn("NOBROCK", tokens)
 
+    def test_video_inspect_uses_cached_metadata_without_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            metadata_dir = data_dir / "youtube_cache" / "vlpLbiqNhLo"
+            metadata_dir.mkdir(parents=True)
+            (metadata_dir / "relevance_none_10.metadata.json").write_text(
+                json.dumps(
+                    {
+                        "youtube_video_id": "vlpLbiqNhLo",
+                        "url": "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                        "title": "cached title",
+                        "channel_title": "cached channel",
+                        "comment_count_available": True,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            inspected = client.inspect_video("https://www.youtube.com/watch?v=vlpLbiqNhLo")
+            self.assertEqual(inspected["metadata_source"], "cache")
+            self.assertEqual(inspected["title"], "cached title")
+
     def test_metadata_list_token_extraction(self):
         tokens = extract_candidate_tokens(
             "DRAW ME（みりちゃむ・福留光帆・森脇梨々夏・風吹ケイ・立野沙紀・二瓶有加）",
@@ -190,9 +213,17 @@ class PipelineTest(unittest.TestCase):
             updated_comment = next(comment for comment in updated_report["comments"] if comment["comment_id"] == target_comment["comment_id"])
             self.assertNotIn(target_person["person_id"], {person["person_id"] for person in updated_comment["mentioned_persons"]})
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
+            self.assertTrue((data_dir / "runs" / run_id / "normalized_comments.jsonl").exists())
+            self.assertTrue((data_dir / "runs" / run_id / "aliases.json").exists())
+            self.assertTrue((data_dir / "runs" / run_id / "clusters.json").exists())
+            self.assertTrue((data_dir / "runs" / run_id / "appeal_labels.json").exists())
+            self.assertGreater(store.conn.execute("select count(*) from appeal_labels where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
+            self.assertGreater(store.conn.execute("select count(*) from clusters where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
             exported = store.export_run(run_id)
             self.assertEqual(exported["schema_version"], "run_export.v1")
             self.assertIn("report.json", exported["artifacts"])
+            self.assertIn("normalized_comments.jsonl", exported["artifacts"])
+            self.assertIn("aliases.json", exported["artifacts"])
 
     def test_inline_subset_replies_are_saved_and_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -500,6 +531,7 @@ class PipelineTest(unittest.TestCase):
 
             self.assertEqual(fake.calls, 1)
             self.assertEqual(cached["source"], "cache")
+            self.assertEqual(store.conn.execute("select count(*) from llm_cache").fetchone()[0], 1)
             self.assertEqual(result["alias_recommendations"][0]["alias"], "ミッタン")
             self.assertEqual(report["llm_assist"]["candidate_recommendations"][0]["display_name"], "みりちゃむ")
             self.assertIn("ai_dictionary_conflicts", report["quality_review"])

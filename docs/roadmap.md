@@ -6,8 +6,4 @@
 
 ## API / データモデルの残り
 
-- `POST /api/videos/inspect` で必要に応じて動画 metadata を確認できるようにする。
-- `appeal_labels` 相当の保存を実装する。
-- `clusters` 相当の保存を実装する。
-- LLM cache の DB 管理を、現在の `llm_assists` / file cache から要件上の汎用 `llm_cache` に寄せるか判断する。
-- `normalized_comments.jsonl`、`aliases.json`、`clusters.json` artifact の出力方針を決める。
+現時点の MVP backlog は空です。次の実データ検証で見つかった分析品質・運用上の課題をここに追加します。
