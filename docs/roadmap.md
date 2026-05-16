@@ -6,13 +6,6 @@
 
 ## MVP-1: 分析品質
 
-### 低信頼・曖昧コメント
-
-- low confidence comments を一覧表示する。
-- AI 判定と辞書判定が食い違ったコメントを表示する。
-- 人間確認を推奨する項目をまとめる。
-- LLM ambiguous classification の batch、retry、schema validation を実装する。
-
 ### 言及ランキング
 
 - 上位 N コメント内での言及数を表示する。

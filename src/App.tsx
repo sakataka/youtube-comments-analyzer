@@ -217,6 +217,24 @@ type CommentCluster = {
   }>;
 };
 
+type ReviewMention = {
+  person_id: string;
+  display_name: string;
+  confidence: number;
+  match_method: string;
+};
+
+type QualityReviewComment = {
+  comment_id: string;
+  text_original: string;
+  like_count: number;
+  is_reply: boolean;
+  reason: string;
+  mentioned_persons: ReviewMention[];
+  suggested_display_name?: string | null;
+  llm_confidence?: string | null;
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -260,6 +278,12 @@ type Report = {
     requested_cluster_count: number;
     clusters: CommentCluster[];
   };
+  quality_review: {
+    low_confidence_comments: QualityReviewComment[];
+    llm_ambiguous_comments: QualityReviewComment[];
+    ai_dictionary_conflicts: QualityReviewComment[];
+    human_review_items: QualityReviewComment[];
+  };
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -270,11 +294,13 @@ type Report = {
     mentioned_persons: Array<{
       person_id: string;
       display_name: string;
+      confidence: number;
+      match_method: string;
     }>;
   }>;
 };
 
-type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
+type ResultTab = "candidates" | "dashboard" | "llm" | "quality" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 type CandidateEntityFilter = "primary" | "non_primary" | "all";
 
@@ -970,6 +996,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={activeTab === "quality" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("quality")}
+            disabled={!report}
+          >
+            要確認
+          </button>
+          <button
+            type="button"
             className={activeTab === "aliases" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("aliases")}
             disabled={!report}
@@ -1444,6 +1478,30 @@ export default function App() {
         </section>
       ) : null}
 
+      {report && activeTab === "quality" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>要確認コメント</h2>
+              <p>低 confidence、AI と辞書判定の差分、LLM が曖昧としたコメントをまとめます。</p>
+            </div>
+            <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
+              {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
+            </button>
+          </div>
+          <div className="review-summary">
+            <span>人間確認 {report.quality_review.human_review_items.length} 件</span>
+            <span>低 confidence {report.quality_review.low_confidence_comments.length} 件</span>
+            <span>AI/辞書差分 {report.quality_review.ai_dictionary_conflicts.length} 件</span>
+            <span>LLM曖昧 {report.quality_review.llm_ambiguous_comments.length} 件</span>
+          </div>
+          <QualityReviewList title="人間確認を推奨" items={report.quality_review.human_review_items} />
+          <QualityReviewList title="低 confidence comments" items={report.quality_review.low_confidence_comments} />
+          <QualityReviewList title="AI 判定と辞書判定の差分" items={report.quality_review.ai_dictionary_conflicts} />
+          <QualityReviewList title="LLM ambiguous classification" items={report.quality_review.llm_ambiguous_comments} />
+        </section>
+      ) : null}
+
       {report && activeTab === "aliases" ? (
         <section className="panel">
           <div className="section-heading">
@@ -1909,6 +1967,45 @@ function FrequentAliasColumn({
         <p className="list-note">該当する表記はありません。</p>
       )}
     </div>
+  );
+}
+
+function QualityReviewList({ title, items }: { title: string; items: QualityReviewComment[] }) {
+  return (
+    <details className="quality-review-section" open={title === "人間確認を推奨"}>
+      <summary>
+        <strong>{title}</strong>
+        <span>{items.length} 件</span>
+      </summary>
+      {items.length ? (
+        <div className="quality-review-list">
+          {items.map((item) => (
+            <article key={`${title}-${item.comment_id}`}>
+              <div>
+                <strong>{item.suggested_display_name ? `LLM候補: ${item.suggested_display_name}` : item.reason}</strong>
+                <LikeCount count={item.like_count} />
+              </div>
+              <p>{item.text_original}</p>
+              <div className="mention-pills">
+                {item.mentioned_persons.length ? (
+                  item.mentioned_persons.map((person) => (
+                    <span key={`${item.comment_id}-${person.person_id}`}>
+                      {person.display_name} / {confidenceLabel("classification", person.confidence)}
+                    </span>
+                  ))
+                ) : (
+                  <span className="mention-pills__empty">現在の辞書判定なし</span>
+                )}
+                {item.llm_confidence ? <span>LLM {item.llm_confidence}</span> : null}
+                {item.is_reply ? <span>返信</span> : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="list-note">該当するコメントはありません。</p>
+      )}
+    </details>
   );
 }
 

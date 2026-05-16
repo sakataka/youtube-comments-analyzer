@@ -677,7 +677,7 @@ class AnalysisStore:
         comments = self.comments_for_snapshot(run["comment_snapshot_id"])
         mentions = self.conn.execute(
             """
-            select m.person_id, p.display_name, m.comment_id, c.text_original, c.like_count
+            select m.person_id, p.display_name, m.comment_id, c.text_original, c.like_count, m.confidence, m.match_method
             from comment_mentions m
             join persons p on p.id = m.person_id
             join comments c on c.id = m.comment_id

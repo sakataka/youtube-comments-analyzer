@@ -653,6 +653,53 @@ h4 {
   margin-top: 4px;
 }
 
+.quality-review-section {
+  border-top: 1px solid #dfe6ef;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.quality-review-section summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+
+.quality-review-section summary span {
+  color: #697789;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.quality-review-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.quality-review-list article {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.quality-review-list article > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.quality-review-list p {
+  color: #384655;
+  line-height: 1.6;
+  margin: 0;
+}
+
 .like-count {
   align-items: center;
   color: #697789;

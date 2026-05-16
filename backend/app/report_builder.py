@@ -113,6 +113,20 @@ def build_mention_ranking(mentions: list[Any], total_comments: int) -> tuple[lis
     return ranking, mentions_by_comment
 
 
+def build_mention_details_by_comment(mentions: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    by_comment: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for mention in mentions:
+        by_comment[mention["comment_id"]].append({
+            "person_id": mention["person_id"],
+            "display_name": mention["display_name"],
+            "confidence": float(mention["confidence"]),
+            "match_method": mention["match_method"],
+        })
+    for rows in by_comment.values():
+        rows.sort(key=lambda row: row["display_name"])
+    return by_comment
+
+
 def build_appeal_summary(mentions: list[Any]) -> dict[str, Any]:
     by_person: dict[str, dict[str, Any]] = {}
     for mention in mentions:
@@ -446,6 +460,67 @@ def cluster_summary_text(label: str, top_persons: list[dict[str, Any]], top_keyw
     return f"{label} に関するコメント群です。主な人物は {person_text}、主な語は {keyword_text} です。"
 
 
+def build_quality_review(
+    comments: list[Any],
+    mention_details_by_comment: dict[str, list[dict[str, Any]]],
+    llm_assist: dict[str, Any] | None,
+) -> dict[str, Any]:
+    comments_by_id = {comment["id"]: comment for comment in comments}
+    low_confidence_comments = []
+    for comment_id, mentions in mention_details_by_comment.items():
+        low_mentions = [mention for mention in mentions if mention["confidence"] < 0.75]
+        if not low_mentions:
+            continue
+        comment = comments_by_id.get(comment_id)
+        if not comment:
+            continue
+        low_confidence_comments.append(review_comment_payload(comment, low_mentions, "低 confidence の alias マッチ"))
+
+    llm_rows = []
+    conflict_rows = []
+    if llm_assist and llm_assist.get("status") != "failed":
+        for item in llm_assist.get("ambiguous_comments") or []:
+            comment = comments_by_id.get(item.get("comment_id"))
+            if not comment:
+                continue
+            current_mentions = mention_details_by_comment.get(comment["id"], [])
+            row = {
+                **review_comment_payload(comment, current_mentions, item.get("reason") or "LLM ambiguous classification"),
+                "suggested_display_name": item.get("suggested_display_name"),
+                "llm_confidence": item.get("confidence"),
+            }
+            llm_rows.append(row)
+            suggested = item.get("suggested_display_name")
+            if suggested and suggested not in {mention["display_name"] for mention in current_mentions}:
+                conflict_rows.append(row)
+
+    human_review_items = []
+    seen: set[str] = set()
+    for row in [*conflict_rows, *low_confidence_comments, *llm_rows]:
+        if row["comment_id"] in seen:
+            continue
+        human_review_items.append(row)
+        seen.add(row["comment_id"])
+
+    return {
+        "low_confidence_comments": sorted(low_confidence_comments, key=lambda row: row["like_count"], reverse=True)[:50],
+        "llm_ambiguous_comments": llm_rows[:50],
+        "ai_dictionary_conflicts": conflict_rows[:50],
+        "human_review_items": human_review_items[:50],
+    }
+
+
+def review_comment_payload(comment: Any, mentions: list[dict[str, Any]], reason: str) -> dict[str, Any]:
+    return {
+        "comment_id": comment["id"],
+        "text_original": comment["text_original"],
+        "like_count": int(comment["like_count"]),
+        "is_reply": bool(comment["is_reply"]),
+        "reason": reason,
+        "mentioned_persons": mentions,
+    }
+
+
 def build_report_payload(
     run_id: str,
     video: Any,
@@ -458,10 +533,12 @@ def build_report_payload(
     llm_assist: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
+    mention_details_by_comment = build_mention_details_by_comment(mentions)
     appeal_summary = build_appeal_summary(mentions)
     cooccurrence = build_cooccurrence(mentions)
     clusters = build_comment_clusters(comments, mentions_by_comment, int(analysis_config.get("cluster_count", 8)))
     llm_section = llm_section_status(llm_assist)
+    quality_review = build_quality_review(comments, mention_details_by_comment, llm_assist)
     return {
         "schema_version": "report.v1",
         "run_id": run_id,
@@ -496,6 +573,7 @@ def build_report_payload(
         "appeal_summary": appeal_summary,
         "cooccurrence": cooccurrence,
         "clusters": clusters,
+        "quality_review": quality_review,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -505,8 +583,13 @@ def build_report_payload(
                 "is_reply": bool(comment["is_reply"]),
                 "parent_comment_id": comment["parent_comment_id"],
                 "mentioned_persons": [
-                    {"person_id": person_id, "display_name": display_name}
-                    for person_id, display_name in sorted(mentions_by_comment[comment["id"]].items(), key=lambda item: item[1])
+                    {
+                        "person_id": mention["person_id"],
+                        "display_name": mention["display_name"],
+                        "confidence": mention["confidence"],
+                        "match_method": mention["match_method"],
+                    }
+                    for mention in mention_details_by_comment.get(comment["id"], [])
                 ],
             }
             for comment in comments
@@ -523,6 +606,7 @@ def build_report_payload(
                 if llm_section["status"] == "failed"
                 else {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"}
             ),
+            "quality_review": {"status": "available"},
             "cooccurrence": {"status": "available"},
             "clusters": {"status": "available"},
         },

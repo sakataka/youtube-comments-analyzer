@@ -150,6 +150,9 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(report["sections"]["clusters"]["status"], "available")
             self.assertGreaterEqual(report["clusters"]["requested_cluster_count"], 5)
             self.assertGreater(len(report["clusters"]["clusters"]), 0)
+            self.assertEqual(report["sections"]["quality_review"]["status"], "available")
+            self.assertIn("low_confidence_comments", report["quality_review"])
+            self.assertIn("human_review_items", report["quality_review"])
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)
@@ -345,8 +348,9 @@ class PipelineTest(unittest.TestCase):
 
     def test_llm_assist_prompt_and_cache_flow(self):
         class FakeLlmClient:
-            def __init__(self):
+            def __init__(self, comment_id: str):
                 self.calls = 0
+                self.comment_id = comment_id
 
             def ask(self, prompt: str) -> str:
                 self.calls += 1
@@ -369,7 +373,14 @@ class PipelineTest(unittest.TestCase):
                                 "reason": "同じ文脈で出現",
                             }
                         ],
-                        "ambiguous_comments": [],
+                        "ambiguous_comments": [
+                            {
+                                "comment_id": self.comment_id,
+                                "suggested_display_name": "別人物",
+                                "confidence": "medium",
+                                "reason": "辞書判定と異なる可能性",
+                            }
+                        ],
                         "notes": ["author情報なしで分析"],
                     },
                     ensure_ascii=False,
@@ -394,7 +405,8 @@ class PipelineTest(unittest.TestCase):
                 },
             )
             store.classify_and_report(run_id)
-            fake = FakeLlmClient()
+            base_report = store.build_report(run_id)
+            fake = FakeLlmClient(base_report["comments"][0]["comment_id"])
             result = store.run_llm_assist(run_id, client=fake)
             cached = store.run_llm_assist(run_id, client=fake)
             report = store.build_report(run_id)
@@ -403,6 +415,8 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(cached["source"], "cache")
             self.assertEqual(result["alias_recommendations"][0]["alias"], "ミッタン")
             self.assertEqual(report["llm_assist"]["candidate_recommendations"][0]["display_name"], "みりちゃむ")
+            self.assertIn("ai_dictionary_conflicts", report["quality_review"])
+            self.assertGreater(len(report["quality_review"]["ai_dictionary_conflicts"]), 0)
             self.assertNotIn("author_display_name", fake.last_prompt)
 
     def test_llm_assist_json_parser_accepts_fenced_json(self):
