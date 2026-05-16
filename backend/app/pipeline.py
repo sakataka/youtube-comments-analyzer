@@ -200,6 +200,19 @@ class AnalysisStore:
         self.conn.row_factory = sqlite3.Row
         self.data_dir = data_dir
         init_db(self.conn)
+        self.recover_running_runs()
+
+    def recover_running_runs(self) -> None:
+        now = utc_now()
+        self.conn.execute(
+            """
+            update analysis_runs
+            set status = 'failed_recoverable', stage = 'recovered_after_restart', progress = 0, error_message = ?, completed_at = ?
+            where status in ('running', 'queued')
+            """,
+            ("サーバー再起動により実行中 job を復旧対象にしました", now),
+        )
+        self.conn.commit()
 
     def create_run(self, bundle: dict[str, Any], config: dict[str, Any]) -> str:
         now = utc_now()

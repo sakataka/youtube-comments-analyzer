@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +30,8 @@ app.add_middleware(
 
 store = AnalysisStore(DB_PATH, DATA_DIR)
 youtube_client = YouTubeCommentClient(DATA_DIR, FIXTURE_PATH)
+job_executor = ThreadPoolExecutor(max_workers=1)
+jobs: dict[str, dict[str, Any]] = {}
 
 
 class InspectRequest(BaseModel):
@@ -145,6 +149,32 @@ def inspect_video(request: InspectRequest) -> dict[str, Any]:
 
 @app.post("/api/runs")
 def create_run(request: RunCreateRequest) -> dict[str, str]:
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    queued_count = sum(1 for job in jobs.values() if job["status"] in {"queued", "running"})
+    jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0.0,
+        "run_id": None,
+        "error_message": None,
+        "queue_position": queued_count + 1,
+    }
+    job_executor.submit(process_run_job, job_id, request)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str) -> dict[str, Any]:
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+    return job
+
+
+def process_run_job(job_id: str, request: RunCreateRequest) -> None:
+    job = jobs[job_id]
+    job.update({"status": "running", "stage": "fetching_comments", "progress": 0.15, "queue_position": 1})
     try:
         bundle = youtube_client.fetch_video_bundle(
             request.url,
@@ -155,14 +185,15 @@ def create_run(request: RunCreateRequest) -> dict[str, str]:
                 force_refresh=request.force_refresh,
             ),
         )
+        job.update({"stage": "creating_run", "progress": 0.55})
         run_id = store.create_run(bundle, request.model_dump())
-        return {"run_id": run_id, "status": "waiting_for_review"}
+        job.update({"status": "completed", "stage": "waiting_for_review", "progress": 1.0, "run_id": run_id})
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": str(exc)})
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"YouTube API 取得に失敗しました: {exc}") from exc
+        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": f"YouTube API 取得に失敗しました: {exc}"})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"分析 run の作成に失敗しました: {exc}") from exc
+        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": f"分析 run の作成に失敗しました: {exc}"})
 
 
 @app.get("/api/runs")

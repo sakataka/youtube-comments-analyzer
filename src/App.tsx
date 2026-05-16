@@ -21,6 +21,18 @@ type RunState = {
   };
 };
 
+type RunJob = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  progress: number;
+  run_id?: string | null;
+  error_message?: string | null;
+  queue_position?: number;
+};
+
+type RunCreateResponse = { run_id: string; status: string } | { job_id: string; status: string };
+
 type SettingsInfo = {
   youtube_api_key_configured: boolean;
   youtube_api_key_env_name: string;
@@ -347,6 +359,7 @@ export default function App() {
   const [forceRefresh, setForceRefresh] = useState(false);
   const [activeTab, setActiveTab] = useState<ResultTab>("candidates");
   const [run, setRun] = useState<RunState | null>(null);
+  const [runJob, setRunJob] = useState<RunJob | null>(null);
   const [runHistory, setRunHistory] = useState<RunState[]>([]);
   const [settingsInfo, setSettingsInfo] = useState<SettingsInfo | null>(null);
   const [dataSummary, setDataSummary] = useState<DataSummary | null>(null);
@@ -536,6 +549,7 @@ export default function App() {
     setLastAction(null);
     setError(null);
     setReport(null);
+    setRunJob(null);
     try {
       const state = await api<RunState>(`/api/runs/${runId}`);
       const nextCandidates = await api<CandidatesResponse>(`/api/runs/${runId}/candidates`);
@@ -567,7 +581,7 @@ export default function App() {
     setError(null);
     setReport(null);
     try {
-      const created = await api<{ run_id: string; status: string }>("/api/runs", {
+      const created = await api<RunCreateResponse>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
           url,
@@ -580,16 +594,35 @@ export default function App() {
           use_embeddings: false
         })
       });
-      const state = await api<RunState>(`/api/runs/${created.run_id}`);
-      const nextCandidates = await api<CandidatesResponse>(`/api/runs/${created.run_id}/candidates`);
-      setRun(state);
-      setCandidates(nextCandidates);
+      if ("job_id" in created) {
+        const completed = await waitForRunJob(created.job_id);
+        if (!completed.run_id) throw new Error(completed.error_message || "job completed without run_id");
+        const state = await api<RunState>(`/api/runs/${completed.run_id}`);
+        const nextCandidates = await api<CandidatesResponse>(`/api/runs/${completed.run_id}/candidates`);
+        setRun(state);
+        setCandidates(nextCandidates);
+      } else {
+        const state = await api<RunState>(`/api/runs/${created.run_id}`);
+        const nextCandidates = await api<CandidatesResponse>(`/api/runs/${created.run_id}/candidates`);
+        setRun(state);
+        setCandidates(nextCandidates);
+      }
       setActiveTab("candidates");
       await refreshRunHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function waitForRunJob(jobId: string): Promise<RunJob> {
+    while (true) {
+      const job = await api<RunJob>(`/api/jobs/${jobId}`);
+      setRunJob(job);
+      if (job.status === "completed") return job;
+      if (job.status === "failed") throw new Error(job.error_message || "分析 job が失敗しました");
+      await new Promise((resolve) => setTimeout(resolve, 600));
     }
   }
 
@@ -821,6 +854,21 @@ export default function App() {
       </section>
 
       {error ? <div className="error-box">{error}</div> : null}
+
+      {runJob && runJob.status !== "completed" ? (
+        <section className="panel status-panel">
+          <div className="status-panel__wide">
+            <span className="label">Job</span>
+            <strong>{runJob.status === "queued" ? "待機中" : runJob.status === "running" ? "実行中" : "失敗"}</strong>
+            <small>
+              {runJob.stage}
+              {runJob.queue_position ? ` / queue ${runJob.queue_position}` : ""}
+            </small>
+          </div>
+          <progress value={runJob.progress} max={1} />
+          {runJob.error_message ? <div className="status-warning">{runJob.error_message}</div> : null}
+        </section>
+      ) : null}
 
       <details className="panel history-panel">
         <summary>

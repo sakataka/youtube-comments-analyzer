@@ -14,6 +14,8 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - live API の取得結果を `data/youtube_cache/` に保存し、同条件では再利用する
 - 差分更新を選ぶと live API で再取得し、既存 cache と重複排除して保存する
 - 分析開始後に `cache` / `youtube_api` / `fixture` の利用状況を表示する
+- 分析 job を同時実行 1 件に制限し、待機中 job を queued として表示する
+- サーバー再起動後に `running` / `queued` のまま残った run を `failed_recoverable` にする
 - 過去分析 run を一覧表示し、保存済み候補・レポートを再表示する
 - 古い run を退避または削除する
 - YouTube cache を退避または削除する
@@ -184,6 +186,8 @@ data/llm_cache/<input_hash>.json
 同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。
 Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
 LLM 補助だけが失敗した場合も、候補抽出・alias・ランキングの通常レポートは有効なまま残し、`sections.llm_assist.status` に `failed` と理由を保存します。
+
+分析 job はアプリ内 queue で同時実行 1 件に制限します。現段階では single-process の `ThreadPoolExecutor(max_workers=1)` で十分なため、本格的な外部 worker / queue 分離は複数プロセス運用や長時間 job が必要になった段階で検討します。
 
 ## レビュー UI
 

@@ -313,6 +313,28 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(deleted["status"], "deleted")
             self.assertFalse((data_dir / "youtube_cache").exists())
 
+    def test_running_runs_are_marked_recoverable_on_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store.conn.execute(
+                "insert into videos values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("video_x", "vlpLbiqNhLo", "https://www.youtube.com/watch?v=vlpLbiqNhLo", "title", "channel", "", None, None, 0, None, None, "now"),
+            )
+            store.conn.execute(
+                "insert into comment_snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("snapshot_x", "video_x", "relevance", 1, 0, "none", 0, 0, 0, "fixture", "now"),
+            )
+            store.conn.execute(
+                "insert into analysis_runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("run_x", "video_x", "snapshot_x", "running", "fetching", 0.2, "{}", "now", "now", None, None),
+            )
+            store.conn.commit()
+            restarted = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            run = restarted.get_run("run_x")
+            self.assertEqual(run["status"], "failed_recoverable")
+            self.assertEqual(run["stage"], "recovered_after_restart")
+
     def test_unknown_alias_suggestions(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

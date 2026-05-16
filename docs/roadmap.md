@@ -4,13 +4,6 @@
 
 完了済みの実装詳細はここには載せません。現状の使い方と実装済み機能は [../README.md](../README.md) を参照してください。
 
-## ジョブ実行
-
-- 同時実行ジョブ数 1 の queued 状態を実装する。
-- 実行中に新しい job が来た場合の待機表示を実装する。
-- サーバー再起動後に `running` のまま残った job を `failed_recoverable` にする。
-- 本格的な worker / queue 分離を検討する。
-
 ## API / データモデルの残り
 
 - `POST /api/videos/inspect` で必要に応じて動画 metadata を確認できるようにする。
