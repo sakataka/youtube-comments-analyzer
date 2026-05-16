@@ -3,8 +3,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from backend.app.candidate_extraction import extract_candidate_tokens
+from backend.app.candidate_extraction import build_candidate_seeds, extract_candidate_tokens, extract_description_person_list_tokens
 from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
@@ -17,12 +18,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class PipelineTest(unittest.TestCase):
+    def store(self, db_path: Path, data_dir: Path) -> AnalysisStore:
+        store = AnalysisStore(db_path, data_dir)
+        self.addCleanup(store.close)
+        return store
+
     def test_candidate_token_extraction(self):
         tokens = extract_candidate_tokens("福留光帆ちゃんとみりちゃむさん、風吹ケイ #NOBROCK")
         self.assertIn("福留光帆", tokens)
         self.assertIn("みりちゃむ", tokens)
         self.assertIn("風吹ケイ", tokens)
-        self.assertIn("NOBROCK", tokens)
+        self.assertNotIn("ちゃんとみりちゃむ", tokens)
+        self.assertNotIn("NOBROCK", tokens)
 
     def test_video_inspect_uses_cached_metadata_without_api(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,6 +63,64 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("みりちゃむ", tokens)
         self.assertIn("立野沙紀", tokens)
         self.assertNotIn("DRAW", tokens)
+
+    def test_candidate_seed_cutoff_skips_obvious_common_words(self):
+        seeds = build_candidate_seeds(
+            "DRAW ME（みりちゃむ・福留光帆）",
+            "",
+            [
+                {"id": "c1", "text_original": "バランスとコメントが最高。みりちゃむさんも良い"},
+                {"id": "c2", "text_original": "バランス良いしコメントも好き"},
+                {"id": "c3", "text_original": "さんとみりちゃむの返しが良い"},
+                {"id": "c4", "text_original": "しがうまいから何度も見たい"},
+            ],
+        )
+        by_name = {seed.token: seed for seed in seeds}
+        self.assertIn("みりちゃむ", by_name)
+        self.assertIn("福留光帆", by_name)
+        self.assertNotIn("バランス", by_name)
+        self.assertNotIn("コメント", by_name)
+        self.assertNotIn("さんとみりちゃむ", by_name)
+        self.assertNotIn("しがうまいから", by_name)
+
+    def test_candidate_tokens_use_morphology_for_honorific_names(self):
+        tokens = extract_candidate_tokens("さくらさんとみりちゃむさんと新居さんが大喜利クリニックで共演")
+        self.assertIn("さくら", tokens)
+        self.assertIn("みりちゃむ", tokens)
+        self.assertIn("新居", tokens)
+        self.assertNotIn("さんとみりちゃむ", tokens)
+        self.assertNotIn("大喜利クリニック", tokens)
+
+    def test_description_guest_list_is_strong_person_context(self):
+        description = """説明文です。
+
+＜ゲスト＞
+新居歩美（ドラマチックレコード）｜https://example.com/a
+賀屋壮也（かが屋）｜https://example.com/b
+さくらもも（ToiToiToi） https://example.com/c
+岸上いお（Peel the Apple） https://example.com/d
+
+＜再生リスト＞
+大喜利地獄
+"""
+        tokens = extract_description_person_list_tokens(description)
+        self.assertEqual(tokens, ["新居歩美", "賀屋壮也", "さくらもも", "岸上いお"])
+        seeds = build_candidate_seeds(
+            "【大喜利地獄】新居歩美がインタビュー全部大喜利で答えちゃうドッキリ",
+            description,
+            [
+                {"id": "c1", "text_original": "新居さんとさくらさんが良かった"},
+                {"id": "c2", "text_original": "岸上さんも賀屋さんもすごい"},
+            ],
+        )
+        by_name = {seed.token: seed for seed in seeds}
+        self.assertEqual(by_name["さくらもも"].status, "accepted")
+        self.assertEqual(by_name["岸上いお"].status, "accepted")
+        self.assertEqual(by_name["さくら"].parent_token, "さくらもも")
+        self.assertNotIn("さくらも", by_name)
+        self.assertEqual(by_name["岸上"].parent_token, "岸上いお")
+        self.assertEqual(by_name["新居"].parent_token, "新居歩美")
+        self.assertNotIn("大喜利地獄", by_name)
 
     def test_noise_keyword_filter(self):
         for term in ["ですよ", "でした", "ってる", "してる", "すぎる"]:
@@ -108,12 +173,13 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            bundle = client.fetch_video_bundle(
-                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                FetchConfig(max_comments=1000, fetch_order="relevance", reply_fetch_mode="none"),
-            )
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=1000, fetch_order="relevance", reply_fetch_mode="none"),
+                )
             self.assertEqual(bundle["fetch_summary"]["source"], "fixture")
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             run_id = store.create_run(
                 bundle,
                 {
@@ -228,7 +294,7 @@ class PipelineTest(unittest.TestCase):
     def test_inline_subset_replies_are_saved_and_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             bundle = {
                 "video": {
                     "youtube_video_id": "vlpLbiqNhLo",
@@ -302,11 +368,12 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            bundle = client.fetch_video_bundle(
-                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                FetchConfig(max_comments=10, fetch_order="relevance", reply_fetch_mode="none"),
-            )
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=10, fetch_order="relevance", reply_fetch_mode="none"),
+                )
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             run_id = store.create_run(
                 bundle,
                 {
@@ -333,7 +400,7 @@ class PipelineTest(unittest.TestCase):
             cache_dir = data_dir / "youtube_cache" / "vlpLbiqNhLo"
             cache_dir.mkdir(parents=True)
             (cache_dir / "relevance_none_10.jsonl").write_text("{}", encoding="utf-8")
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             archived = store.archive_youtube_cache()
             self.assertEqual(archived["status"], "archived")
             self.assertFalse((data_dir / "youtube_cache").exists())
@@ -347,7 +414,7 @@ class PipelineTest(unittest.TestCase):
     def test_running_runs_are_marked_recoverable_on_startup(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             store.conn.execute(
                 "insert into videos values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("video_x", "vlpLbiqNhLo", "https://www.youtube.com/watch?v=vlpLbiqNhLo", "title", "channel", "", None, None, 0, None, None, "now"),
@@ -361,7 +428,7 @@ class PipelineTest(unittest.TestCase):
                 ("run_x", "video_x", "snapshot_x", "running", "fetching", 0.2, "{}", "now", "now", None, None),
             )
             store.conn.commit()
-            restarted = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            restarted = self.store(data_dir / "app.sqlite3", data_dir)
             run = restarted.get_run("run_x")
             self.assertEqual(run["status"], "failed_recoverable")
             self.assertEqual(run["stage"], "recovered_after_restart")
@@ -369,7 +436,7 @@ class PipelineTest(unittest.TestCase):
     def test_unknown_alias_suggestions(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             bundle = {
                 "video": {
                     "youtube_video_id": "vlpLbiqNhLo",
@@ -507,11 +574,12 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            bundle = client.fetch_video_bundle(
-                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-            )
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+                )
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             run_id = store.create_run(
                 bundle,
                 {
@@ -534,6 +602,7 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(store.conn.execute("select count(*) from llm_cache").fetchone()[0], 1)
             self.assertEqual(result["alias_recommendations"][0]["alias"], "ミッタン")
             self.assertEqual(report["llm_assist"]["candidate_recommendations"][0]["display_name"], "みりちゃむ")
+            self.assertEqual(store.get_latest_report(run_id)["llm_assist"]["alias_recommendations"][0]["alias"], "ミッタン")
             self.assertIn("ai_dictionary_conflicts", report["quality_review"])
             self.assertGreater(len(report["quality_review"]["ai_dictionary_conflicts"]), 0)
             self.assertNotIn("author_display_name", fake.last_prompt)
@@ -554,11 +623,12 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            bundle = client.fetch_video_bundle(
-                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-            )
-            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+                )
+            store = self.store(data_dir / "app.sqlite3", data_dir)
             run_id = store.create_run(
                 bundle,
                 {
@@ -574,6 +644,7 @@ class PipelineTest(unittest.TestCase):
             report = store.build_report(run_id)
 
             self.assertEqual(result["status"], "failed")
+            self.assertEqual(store.get_latest_report(run_id)["llm_assist"]["status"], "failed")
             self.assertEqual(report["sections"]["mention_ranking"]["status"], "available")
             self.assertEqual(report["sections"]["llm_assist"]["status"], "failed")
             self.assertIn("codex app server timeout", report["sections"]["llm_assist"]["reason"])

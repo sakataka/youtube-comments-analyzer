@@ -4,6 +4,8 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 
 現在の実装は MVP-2 の一部です。YouTube Data API または fixture からコメントを保存し、SudachiPy ベースの日本語解析と accepted alias による deterministic な集計を行います。必要に応じて Codex app server 経由の LLM 補助分析を実行できます。
 
+このリポジトリはローカル実行を前提にしています。YouTube Data API key は各自の環境で `.env` に設定し、取得データや cache は Git 管理しません。
+
 ## 現在できること
 
 - YouTube URL から `video_id` を抽出する
@@ -86,9 +88,10 @@ cp .env.example .env
 YOUTUBE_API_KEY=
 DATABASE_URL=
 DATA_DIR=
+YOUTUBE_FIXTURE_FALLBACK=
 ```
 
-`YOUTUBE_API_KEY` が空の場合は fixture を使います。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。
+`YOUTUBE_API_KEY` が空の場合、cache がある動画だけを再分析できます。未cacheの実動画は fixture で代用せず、設定エラーとして止めます。テスト用 fixture を明示的に使う場合だけ `YOUTUBE_FIXTURE_FALLBACK=1` を設定します。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。
 
 ## 起動
 
@@ -104,10 +107,10 @@ set +a
 フロントエンド:
 
 ```bash
-VITE_API_BASE_URL=http://127.0.0.1:8000 bun run dev
+bun run dev
 ```
 
-Vite は空きポートを自動割り当てします。表示された `Local:` の URL をブラウザで開いてください。
+Vite は空きポートを自動割り当てします。表示された `Local:` の URL をブラウザで開いてください。開発時の API は Vite proxy が `/api` を `http://127.0.0.1:8000` へ転送します。
 
 ## デモ手順
 
@@ -141,11 +144,11 @@ curl http://127.0.0.1:8000/api/health
 curl -X POST http://127.0.0.1:8000/api/videos/inspect \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://www.youtube.com/watch?v=vlpLbiqNhLo"}'
-bun test
+bun run test
 bun run build
 ```
 
-`bun test` は live API を使わず、fixture で integration test を通します。
+`bun run test` は live API を使わず、fixture で integration test を通します。
 live API を使う検証は `backend/live_tests/` に分離し、必要なときだけ `bun run test:live` で実行します。
 
 ## コメント取得データの保存と再利用
@@ -213,11 +216,14 @@ LLM 補助だけが失敗した場合も、候補抽出・alias・ランキン�
 - `GET /api/health`
 - `GET /api/settings`
 - `GET /api/data/summary`
+- `POST /api/data/actions`
 - `POST /api/videos/inspect`
 - `POST /api/runs`
+- `GET /api/jobs/{job_id}`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/candidates`
 - `POST /api/runs/{run_id}/candidate-actions`
+- `POST /api/runs/{run_id}/comment-actions`
 - `POST /api/runs/{run_id}/continue`
 - `POST /api/runs/{run_id}/llm-assist`
 - `GET /api/runs/{run_id}/report`
@@ -255,6 +261,14 @@ docs/
 - LLM 補助分析は Codex app server 経由で行い、このアプリ専用の OpenAI API key は使いません。
 - LLM 補助分析には author 情報を送らず、コメント本文と分析済み候補だけを渡します。
 - 現在の API key は Google Cloud Console 側で `YouTube Data API v3` のみに制限してください。
+
+## トラブルシューティング
+
+開発中に `Failed to fetch` が出る場合や、Vite proxy とバックエンド URL の確認が必要な場合は [docs/troubleshooting.md](docs/troubleshooting.md) を参照してください。
+
+## ライセンス
+
+MIT License です。詳細は [LICENSE](LICENSE) を参照してください。
 
 ## ロードマップ
 

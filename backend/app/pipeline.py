@@ -229,6 +229,15 @@ class AnalysisStore:
         init_db(self.conn)
         self.recover_running_runs()
 
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> "AnalysisStore":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
     def recover_running_runs(self) -> None:
         now = utc_now()
         self.conn.execute(
@@ -759,6 +768,7 @@ class AnalysisStore:
             result = {**cached, "source": "cache", "input_hash": cache_key}
             self.save_llm_assist(run_id, cache_key, result, raw_text=None, status="completed")
             self._write_run_artifact(run_id, "llm_assist.json", result)
+            self.persist_report(run_id, self.build_report(run_id))
             return result
 
         active_client = client or CodexAppServerClient()
@@ -770,12 +780,14 @@ class AnalysisStore:
             result = build_failed_llm_assist(cache_key, exc)
             self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="failed")
             self._write_run_artifact(run_id, "llm_assist.json", result)
+            self.persist_report(run_id, self.build_report(run_id))
             return result
         result = {**parsed, "source": "codex_app_server", "input_hash": cache_key}
         write_cached_llm_assist(cache_dir, cache_key, result)
         self.write_llm_cache(cache_key, result, raw_text)
         self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")
         self._write_run_artifact(run_id, "llm_assist.json", result)
+        self.persist_report(run_id, self.build_report(run_id))
         return result
 
     def save_llm_assist(
@@ -935,7 +947,23 @@ class AnalysisStore:
         ).fetchone()
         if not row:
             raise KeyError(f"report not found: {run_id}")
-        return json.loads(row["report_json"])
+        report = json.loads(row["report_json"])
+        latest_llm_assist = self.get_latest_llm_assist(run_id)
+        if latest_llm_assist and report.get("llm_assist") != latest_llm_assist:
+            report = self.build_report(run_id)
+            self.persist_report(run_id, report)
+        return report
+
+    def persist_report(self, run_id: str, report: dict[str, Any]) -> None:
+        self.conn.execute(
+            "insert into reports values (?, ?, ?, ?)",
+            (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
+        )
+        self.save_report_sections(run_id, report)
+        self.conn.commit()
+        self._write_run_artifact(run_id, "report.json", report)
+        self._write_run_artifact(run_id, "clusters.json", report["clusters"])
+        self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
 
     def export_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)

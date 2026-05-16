@@ -145,6 +145,9 @@ class YouTubeCommentClient:
             metadata = self._read_metadata(cache_file)
             return self._bundle(url, video_id, metadata, comments, "cache")
 
+        if os.getenv("YOUTUBE_FIXTURE_FALLBACK") != "1":
+            raise RuntimeError("YOUTUBE_API_KEY が未設定で、この動画の cache もありません。実データを取得するには .env の YOUTUBE_API_KEY を設定してバックエンドを再起動してください。")
+
         comments = self._read_jsonl(self.fixture_path)
         metadata = {
             "youtube_video_id": video_id,

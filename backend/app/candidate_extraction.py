@@ -6,16 +6,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from .text import normalize_alias
-from .text_filters import is_noise_keyword, person_alias_terms
+from .text_filters import honorific_person_alias_terms, is_noise_keyword, is_person_alias_like, person_alias_terms
 
 
-HONORIFIC_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
+HONORIFIC_RE = re.compile(
+    r"([一-龥々]{2,6}|[一-龥々]{1,4}[ァ-ヶー]{2,8}|[ァ-ヶー]{3,16}|[ぁ-んー]{2,8}(?:ちゃむ|ちゃん|たん|りん|ぽん|ぴょん|みん|っち|ちん|きゅん|にゃん))(さん|ちゃん|くん|君|氏|様)"
+)
 KATAKANA_RE = re.compile(r"[ァ-ヶー]{3,16}")
 KANJI_KATAKANA_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
 HASHTAG_RE = re.compile(r"#([一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24})")
 BRACKET_CONTENT_RE = re.compile(r"[【\[\(（]([^】\]\)）]{2,160})[】\]\)）]")
 METADATA_TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24}")
 METADATA_SPLIT_RE = re.compile(r"[、,／/・\s]+")
+METADATA_PERSON_LIST_HEADING_RE = re.compile(r"^[＜<【\[]?\s*(ゲスト|出演|出演者|出演メンバー|登場人物|参加者|キャスト)\s*[＞>】\]]?\s*$")
+URL_TOKEN_RE = re.compile(r"https?://\S+")
 
 GENERIC_TOKEN_STOPWORDS = {
     "コメント",
@@ -103,26 +107,24 @@ def build_candidate_seeds(
     source_kinds: dict[str, set[str]] = defaultdict(set)
     representative_ids: dict[str, list[str]] = defaultdict(list)
 
-    metadata_inputs = [
-        (title, True, "metadata_title"),
-        (description, False, "metadata_description"),
-    ]
-    for text, include_loose_metadata, source_kind in metadata_inputs:
-        for token in extract_candidate_tokens(
-            text,
-            include_metadata_lists=True,
-            include_loose_metadata=include_loose_metadata,
-        ):
-            frequencies[token] += 12
-            source_kinds[token].add(source_kind)
+    for token in extract_candidate_tokens(title, include_metadata_lists=True):
+        frequencies[token] += 12
+        source_kinds[token].add("metadata_title")
+
+    for token in extract_description_person_list_tokens(description):
+        frequencies[token] += 12
+        source_kinds[token].add("metadata_description")
 
     for comment in comments:
         seen_in_comment: set[str] = set()
+        honorific_aliases = {normalize_alias(token) for token in honorific_person_alias_terms(comment["text_original"])}
         for token in extract_candidate_tokens(comment["text_original"]):
             normalized = normalize_alias(token)
             if normalized not in seen_in_comment:
                 frequencies[token] += 1
                 source_kinds[token].add("comment")
+                if normalized in honorific_aliases:
+                    source_kinds[token].add("comment_honorific")
                 seen_in_comment.add(normalized)
             if len(representative_ids[token]) < 3:
                 representative_ids[token].append(comment["id"])
@@ -130,7 +132,7 @@ def build_candidate_seeds(
     metadata_person_tokens = [
         token
         for token in frequencies
-        if "metadata_title" in source_kinds[token]
+        if {"metadata_title", "metadata_description"} & source_kinds[token]
         and not is_generic_candidate(token)
         and len(normalize_alias(token)) > 1
     ]
@@ -139,10 +141,38 @@ def build_candidate_seeds(
         *[token for token, _ in candidate_frequency_order(frequencies)],
     ])
 
+    filtered_tokens = [
+        token
+        for token in ordered_tokens
+        if should_keep_candidate_token(token, frequencies, source_kinds[token], metadata_person_tokens)
+    ]
+
     return [
         build_candidate_seed(token, frequencies, source_kinds, representative_ids, metadata_person_tokens)
-        for token in ordered_tokens[:limit]
+        for token in filtered_tokens[:limit]
     ]
+
+
+def should_keep_candidate_token(
+    token: str,
+    frequencies: Counter[str],
+    source_kinds: set[str],
+    metadata_person_tokens: list[str],
+) -> bool:
+    normalized = normalize_alias(token)
+    if len(normalized) <= 1:
+        return False
+    if looks_like_sentence_fragment(token):
+        return False
+    if is_generic_candidate(token):
+        return False
+    if "metadata_title" in source_kinds or "metadata_description" in source_kinds:
+        return True
+    if find_metadata_parent_token(token, metadata_person_tokens):
+        return True
+    if "comment_honorific" in source_kinds:
+        return True
+    return frequencies[token] >= 2
 
 
 def build_candidate_seed(
@@ -155,13 +185,13 @@ def build_candidate_seed(
     count = frequencies[token]
     normalized = normalize_alias(token)
     generic = is_generic_candidate(token)
-    from_title_metadata = "metadata_title" in source_kinds[token]
+    from_strong_metadata = bool({"metadata_title", "metadata_description"} & source_kinds[token])
     parent_token = find_metadata_parent_token(token, metadata_person_tokens)
 
     if len(normalized) <= 1 or generic:
         status = "rejected"
         confidence = 0.2
-    elif from_title_metadata:
+    elif from_strong_metadata:
         status = "accepted"
         confidence = min(0.95, 0.68 + count / 30)
     else:
@@ -194,7 +224,7 @@ def build_candidate_seed(
         entity_type=guess_entity_type(token),
         representative_ids=representative_ids[token],
         parent_token=parent_token,
-        derived_aliases=derived_aliases if from_title_metadata and status == "accepted" else [],
+        derived_aliases=derived_aliases if from_strong_metadata and status == "accepted" else [],
     )
 
 
@@ -205,11 +235,10 @@ def extract_candidate_tokens(
 ) -> list[str]:
     if not text:
         return []
+    trusted_aliases = person_alias_terms(text)
+    trusted_normalized = {normalize_alias(token) for token in trusted_aliases}
     tokens: list[str] = []
-    tokens.extend(person_alias_terms(text))
-    tokens.extend(match.group(1) for match in HONORIFIC_RE.finditer(text))
-    tokens.extend(match.group(0) for match in KANJI_KATAKANA_RE.finditer(text))
-    tokens.extend(match.group(0) for match in KATAKANA_RE.finditer(text))
+    tokens.extend(trusted_aliases)
     tokens.extend(match.group(1) for match in HASHTAG_RE.finditer(text))
     if include_metadata_lists:
         tokens.extend(extract_metadata_list_tokens(text, include_loose_metadata))
@@ -219,9 +248,51 @@ def extract_candidate_tokens(
         cleaned_token = clean_candidate_token(token)
         if not cleaned_token or cleaned_token in seen or is_noise_keyword(cleaned_token):
             continue
+        if normalize_alias(cleaned_token) not in trusted_normalized and not is_person_alias_like(cleaned_token):
+            continue
         cleaned.append(cleaned_token)
         seen.add(cleaned_token)
     return cleaned
+
+
+def extract_description_person_list_tokens(text: str) -> list[str]:
+    if not text:
+        return []
+    candidates: list[str] = []
+    in_people_block = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if in_people_block:
+                break
+            continue
+        if METADATA_PERSON_LIST_HEADING_RE.match(line):
+            in_people_block = True
+            continue
+        if not in_people_block:
+            continue
+        if line.startswith(("▼", "＜", "<", "【", "#")) or URL_TOKEN_RE.search(line):
+            if URL_TOKEN_RE.search(line):
+                line = URL_TOKEN_RE.sub("", line).strip()
+            else:
+                break
+        name_part = clean_metadata_person_name(line)
+        if name_part:
+            candidates.append(name_part)
+    return unique_ordered_tokens(candidates)
+
+
+def clean_metadata_person_name(line: str) -> str:
+    name = re.split(r"[（(｜|]", line, maxsplit=1)[0].strip()
+    name = re.sub(r"^[・\-—\s]+", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if not contains_japanese(name):
+        return ""
+    if is_generic_candidate(name):
+        return ""
+    if len(normalize_alias(name)) <= 1 or len(name) > 24:
+        return ""
+    return name
 
 
 def extract_metadata_list_tokens(text: str, include_loose_metadata: bool = False) -> list[str]:
@@ -257,6 +328,20 @@ def is_generic_candidate(token: str) -> bool:
     if token in GENERIC_TOKEN_STOPWORDS or normalize_alias(token) in normalized_stopwords:
         return True
     return any(keyword in token for keyword in GENERIC_TOKEN_KEYWORDS)
+
+
+def looks_like_person_name(token: str) -> bool:
+    return bool(
+        re.fullmatch(r"[一-龥々]{2,5}", token)
+        or re.fullmatch(r"[ぁ-んァ-ヶー]{3,10}", token)
+        or re.fullmatch(r"[一-龥々]{1,4}[ァ-ヶー]{2,8}", token)
+    )
+
+
+def looks_like_sentence_fragment(token: str) -> bool:
+    if re.search(r"[ぁ-ん](?:が|を|に|で|と|から|まで|より)[ぁ-ん]", token):
+        return True
+    return token.startswith(("さん", "ちゃん", "くん")) or token.endswith(("から", "いる", "する", "して", "した"))
 
 
 def contains_japanese(token: str) -> bool:

@@ -98,10 +98,15 @@ _FUNCTION_POS = {"助詞", "助動詞", "補助記号", "記号", "空白"}
 _CONTENT_POS = {"名詞", "動詞", "形容詞", "形状詞"}
 _NON_INDEPENDENT_POS2 = {"非自立可能"}
 _TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶーA-Za-z]{2,24}")
-_HONORIFIC_TERM_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
-_NICKNAME_TERM_RE = re.compile(r"[ァ-ヶー]{3,16}|[ぁ-んー]{3,12}")
+_HONORIFIC_TERM_RE = re.compile(
+    r"([一-龥々]{2,6}|[一-龥々]{1,4}[ァ-ヶー]{2,8}|[ァ-ヶー]{2,16}|(?![ともがはをにでの])[ぁ-んー]{2,5})(さん|ちゃん|くん|君|氏|様)"
+)
+_KATAKANA_NICKNAME_RE = re.compile(r"[ァ-ヶー]{2,10}(?:チャン|タン|リン|ポン|ピョン|ミン|ッチ|チン|キュン|ニャン)")
+_HIRAGANA_NICKNAME_RE = re.compile(r"(?![ともがはをにでの])[ぁ-んー]{2,8}(?:ちゃむ|ちゃん|りん|ぽん|ぴょん|みん|っち|ちん|きゅん|にゃん)")
 _KANJI_NAME_RE = re.compile(r"[一-龥々]{2,6}")
 _KANJI_KATAKANA_NAME_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
+_EMBEDDED_HONORIFIC_RE = re.compile(r"(さん|ちゃん|くん|君|氏|様).+")
+_HIRAGANA_PARTICLE_PHRASE_RE = re.compile(r"[ぁ-ん](?:が|を|に|で|と|から|まで|より)[ぁ-ん]")
 EVALUATION_KEYWORDS = {
     "positive": ("好き", "最高", "良い", "いい", "素敵", "尊敬", "面白い", "面白", "かわいい", "可愛い", "綺麗", "すごい", "推し"),
     "negative": ("嫌い", "苦手", "つまらない", "つまら", "無理", "怖い", "ひどい", "嫌"),
@@ -180,16 +185,24 @@ def is_person_alias_like(term: str) -> bool:
         return False
     if re.search(r"\d", normalized):
         return False
-    if _HONORIFIC_TERM_RE.fullmatch(term):
-        return True
-    if _KANJI_KATAKANA_NAME_RE.fullmatch(term):
-        return True
-    if _NICKNAME_TERM_RE.fullmatch(term):
-        return True
+    honorific_match = _HONORIFIC_TERM_RE.fullmatch(term)
+    if honorific_match:
+        alias = honorific_match.group(1)
+        if is_honorific_capture_noise(alias):
+            return False
+        if honorific_alias_is_morphological_person(alias, term):
+            return True
+        return bool(_KATAKANA_NICKNAME_RE.fullmatch(alias) or _HIRAGANA_NICKNAME_RE.fullmatch(alias))
     tokens = analyze_japanese(term)
     if tokens and all(is_person_name_token(token) for token in tokens):
         return True
-    return bool(_KANJI_NAME_RE.fullmatch(term) and len(normalized) >= 3)
+    if _KATAKANA_NICKNAME_RE.fullmatch(term) or _HIRAGANA_NICKNAME_RE.fullmatch(term):
+        return True
+    if _KANJI_KATAKANA_NAME_RE.fullmatch(term):
+        return not tokens
+    if _KANJI_NAME_RE.fullmatch(term):
+        return len(normalized) >= 3 if not tokens else False
+    return False
 
 
 def is_person_name_token(token: JapaneseToken) -> bool:
@@ -197,10 +210,11 @@ def is_person_name_token(token: JapaneseToken) -> bool:
 
 
 def person_alias_terms(text: str) -> list[str]:
+    trusted_terms = honorific_person_alias_terms(text)
     terms: list[str] = []
-    terms.extend(match.group(1) for match in _HONORIFIC_TERM_RE.finditer(text))
     terms.extend(match.group(0) for match in _KANJI_KATAKANA_NAME_RE.finditer(text))
-    terms.extend(match.group(0) for match in _NICKNAME_TERM_RE.finditer(text))
+    terms.extend(match.group(0) for match in _KATAKANA_NICKNAME_RE.finditer(text))
+    terms.extend(match.group(0) for match in _HIRAGANA_NICKNAME_RE.finditer(text))
     analyzed = analyze_japanese(text)
     name_buffer: list[str] = []
     for token in analyzed:
@@ -208,16 +222,64 @@ def person_alias_terms(text: str) -> list[str]:
             name_buffer.append(token.surface)
             continue
         if name_buffer:
-            terms.append("".join(name_buffer))
+            buffered = "".join(name_buffer)
+            if len(normalize_alias(buffered)) > 2:
+                terms.append(buffered)
             name_buffer = []
     if name_buffer:
-        terms.append("".join(name_buffer))
-    cleaned = [clean_person_alias_term(term) for term in terms]
-    return filter_keywords([term for term in cleaned if is_person_alias_like(term)])
+        buffered = "".join(name_buffer)
+        if len(normalize_alias(buffered)) > 2:
+            terms.append(buffered)
+    cleaned_trusted = filter_keywords(clean_person_alias_term(term) for term in trusted_terms)
+    cleaned = [clean_person_alias_term(term) for term in terms if not is_honorific_capture_noise(term)]
+    return unique_terms([*cleaned_trusted, *filter_keywords([term for term in cleaned if is_person_alias_like(term)])])
+
+
+def honorific_person_alias_terms(text: str) -> list[str]:
+    terms: list[str] = []
+    for match in _HONORIFIC_TERM_RE.finditer(text):
+        full_term = f"{match.group(1)}{match.group(2)}"
+        alias = match.group(1)
+        if is_honorific_capture_noise(alias):
+            continue
+        if is_person_alias_like(full_term):
+            terms.append(alias)
+    return unique_terms(terms)
+
+
+def is_honorific_capture_noise(term: str) -> bool:
+    return bool(
+        term.startswith(("と", "も", "が", "は", "を", "に", "で", "の"))
+        or term.startswith(("した", "して", "って", "える"))
+        or _EMBEDDED_HONORIFIC_RE.search(term)
+        or _HIRAGANA_PARTICLE_PHRASE_RE.search(term)
+    )
+
+
+def honorific_alias_is_morphological_person(alias: str, full_term: str) -> bool:
+    tokens = analyze_japanese(full_term)
+    if not tokens:
+        return False
+    name_tokens = [token for token in tokens if token.surface not in {"さん", "ちゃん", "くん", "君", "氏", "様"}]
+    if not name_tokens or "".join(token.surface for token in name_tokens) != alias:
+        return False
+    return all(is_person_name_token(token) for token in name_tokens)
 
 
 def clean_person_alias_term(term: str) -> str:
-    return re.sub(r"[はがもにをでとの]$", "", term.strip())
+    return re.sub(r"[はがにをでとの]$", "", term.strip())
+
+
+def unique_terms(terms: Iterable[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        normalized = normalize_alias(term)
+        if not normalized or normalized in seen:
+            continue
+        output.append(term)
+        seen.add(normalized)
+    return output
 
 
 def evaluation_terms(text: str) -> list[dict[str, str]]:

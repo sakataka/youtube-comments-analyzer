@@ -1,4 +1,4 @@
-import { Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from "react";
+import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useState } from "react";
 
 type RunState = {
   run_id: string;
@@ -335,9 +335,9 @@ type Report = {
 
 type ResultTab = "candidates" | "dashboard" | "llm" | "quality" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
-type CandidateEntityFilter = "primary" | "non_primary" | "all";
+type CandidateEntityFilter = "needs_review" | "primary" | "non_primary" | "all";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL ?? "");
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -352,7 +352,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export default function App() {
-  const [url, setUrl] = useState("https://www.youtube.com/watch?v=vlpLbiqNhLo");
+  const [url, setUrl] = useState("");
   const [maxComments, setMaxComments] = useState(5000);
   const [clusterCount, setClusterCount] = useState(8);
   const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset" | "full">("none");
@@ -369,12 +369,12 @@ export default function App() {
   const [llmBusy, setLlmBusy] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
-  const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [aliasSuggestionDrafts, setAliasSuggestionDrafts] = useState<Record<string, string>>({});
   const [ignoredAliasSuggestions, setIgnoredAliasSuggestions] = useState<Record<string, boolean>>({});
   const [aliasSuggestionReview, setAliasSuggestionReview] = useState<Record<string, AliasReviewState>>({});
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [candidateEntityFilter, setCandidateEntityFilter] = useState<CandidateEntityFilter>("primary");
+  const [candidateReviewIndex, setCandidateReviewIndex] = useState(0);
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
@@ -396,9 +396,23 @@ export default function App() {
   const visibleCandidatePersons = useMemo(() => {
     const persons = candidates?.persons ?? [];
     if (candidateEntityFilter === "all") return persons;
-    if (candidateEntityFilter === "non_primary") return persons.filter((person) => !isPrimaryEntityType(person.entity_type));
-    return persons.filter((person) => isPrimaryEntityType(person.entity_type));
+    if (candidateEntityFilter === "non_primary") return persons.filter((person) => !isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+    if (candidateEntityFilter === "needs_review") {
+      return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+    }
+    return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
   }, [candidateEntityFilter, candidates]);
+
+  const decidedPrimaryCandidatePersons = useMemo(() => {
+    return (candidates?.persons ?? [])
+      .filter((person) => ["accepted", "rejected"].includes(person.status) && isPrimaryEntityType(person.entity_type))
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === "accepted" ? -1 : 1;
+        return b.accepted_mention_comment_count - a.accepted_mention_comment_count;
+      });
+  }, [candidates]);
+
+  const currentCandidatePerson = visibleCandidatePersons[candidateReviewIndex] ?? null;
 
   const commentPersonOptions = useMemo(() => {
     return report?.rankings.mention_ranking.map((row) => ({ person_id: row.person_id, display_name: row.display_name })) ?? [];
@@ -437,6 +451,10 @@ export default function App() {
       return matchesText && matchesPerson;
     });
   }, [commentPersonFilter, commentSearch, report]);
+
+  useEffect(() => {
+    setCandidateReviewIndex(0);
+  }, [candidateEntityFilter, candidates?.run_id]);
 
   const selectedDetailPerson = useMemo(() => {
     if (!report?.rankings.mention_ranking.length) return null;
@@ -486,6 +504,16 @@ export default function App() {
     void refreshRunHistory();
     void refreshOpsInfo();
   }, []);
+
+  useEffect(() => {
+    setCandidateReviewIndex(0);
+  }, [candidateEntityFilter, candidates?.run_id]);
+
+  useEffect(() => {
+    if (candidateReviewIndex >= visibleCandidatePersons.length) {
+      setCandidateReviewIndex(Math.max(visibleCandidatePersons.length - 1, 0));
+    }
+  }, [candidateReviewIndex, visibleCandidatePersons.length]);
 
   async function refreshRunHistory() {
     try {
@@ -650,6 +678,12 @@ export default function App() {
       });
       const nextCandidates = await api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`);
       setCandidates(nextCandidates);
+      if (shouldAdvanceCandidateCard(action.type)) {
+        setCandidateReviewIndex((index) => {
+          if (candidateEntityFilter === "needs_review") return index;
+          return Math.min(index + 1, Math.max(visibleCandidatePersons.length - 1, 0));
+        });
+      }
       setLastAction(label);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -666,16 +700,6 @@ export default function App() {
       { type: "update_display_name", person_id: person.person_id, display_name: displayName },
       `${person.display_name} の表示名を ${displayName} に更新しました`
     );
-  }
-
-  async function addAlias(person: Person) {
-    const aliasText = (aliasDrafts[person.person_id] ?? "").trim();
-    if (!aliasText) return;
-    await updateCandidate(
-      { type: "add_alias", person_id: person.person_id, alias_text: aliasText },
-      `${person.display_name} に表記「${aliasText}」を追加しました`
-    );
-    setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
   }
 
   async function mergePerson(person: Person) {
@@ -786,6 +810,80 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLlmBusy(false);
+    }
+  }
+
+  async function applyLlmAssist() {
+    if (!run || !report?.llm_assist || report.llm_assist.status === "failed") return;
+    const candidateActions: Array<Record<string, string>> = [];
+    const commentActions: Array<Record<string, string>> = [];
+    const personsByName = new Map((candidates?.persons ?? report.persons).map((person) => [person.display_name, person]));
+
+    for (const item of report.llm_assist.candidate_recommendations) {
+      const person = personsByName.get(item.display_name);
+      if (!person) continue;
+      if (item.recommendation === "accept") {
+        candidateActions.push({ type: "accept_person", person_id: person.person_id });
+      } else if (item.recommendation === "reject") {
+        candidateActions.push({ type: "reject_person", person_id: person.person_id });
+      } else if (item.recommendation === "merge" && item.target_display_name) {
+        const target = personsByName.get(item.target_display_name);
+        if (target && target.person_id !== person.person_id) {
+          candidateActions.push({ type: "merge_person", source_person_id: person.person_id, target_person_id: target.person_id });
+        }
+      }
+    }
+
+    for (const item of report.llm_assist.alias_recommendations) {
+      if (item.confidence === "low") continue;
+      const target = personsByName.get(item.target_display_name);
+      if (target) {
+        candidateActions.push({ type: "add_alias", person_id: target.person_id, alias_text: item.alias });
+      }
+    }
+
+    for (const item of report.llm_assist.ambiguous_comments) {
+      if (!item.suggested_display_name || item.confidence === "low") continue;
+      const target = personsByName.get(item.suggested_display_name);
+      if (target) {
+        commentActions.push({ type: "add_mention", comment_id: item.comment_id, person_id: target.person_id });
+      }
+    }
+
+    if (!candidateActions.length && !commentActions.length) {
+      setLastAction("反映できる LLM 提案はありません");
+      return;
+    }
+
+    setBusy(true);
+    setLastAction(null);
+    setError(null);
+    try {
+      if (candidateActions.length) {
+        await api(`/api/runs/${run.run_id}/candidate-actions`, {
+          method: "POST",
+          body: JSON.stringify({ actions: candidateActions })
+        });
+      }
+      let nextReport: Report;
+      if (commentActions.length) {
+        nextReport = await api<Report>(`/api/runs/${run.run_id}/comment-actions`, {
+          method: "POST",
+          body: JSON.stringify({ actions: commentActions })
+        });
+      } else {
+        const nextRun = await api<RunState>(`/api/runs/${run.run_id}/continue`, { method: "POST" });
+        setRun(nextRun);
+        nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
+      }
+      const nextCandidates = await api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`);
+      setCandidates(nextCandidates);
+      setReport(nextReport);
+      setLastAction(`LLM 提案を反映しました（候補 ${candidateActions.length} 件 / コメント ${commentActions.length} 件）`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1026,62 +1124,61 @@ export default function App() {
       </details>
 
       {run ? (
-        <section className="panel status-panel">
-          {run.video ? (
-            <div className="status-panel__wide">
-              <span className="label">Video</span>
-              <strong>{run.video.title || run.video.youtube_video_id}</strong>
-              <small>
-                {run.video.channel_title || "チャンネル未取得"} / YouTube表示コメント数:{" "}
-                {formatNullableNumber(run.video.youtube_comment_count)}
-              </small>
+        <section className="panel status-panel status-panel--run">
+          <div className="run-overview">
+            {run.video ? (
+              <div className="run-video">
+                <span className="label">Video</span>
+                <strong>{run.video.title || run.video.youtube_video_id}</strong>
+                <small>
+                  {run.video.channel_title || "チャンネル未取得"} / YouTube表示 {formatNullableNumber(run.video.youtube_comment_count)}
+                </small>
+              </div>
+            ) : null}
+            <div className="run-badges" aria-label="run 状態">
+              <span title={run.run_id}>#{shortRunId(run.run_id)}</span>
+              <span>{runStatusLabel(run.status)}</span>
+              <span>{runStageLabel(run.stage)}</span>
             </div>
-          ) : null}
-          <div>
-            <span className="label">Run</span>
-            <strong>{run.run_id}</strong>
-          </div>
-          <div>
-            <span className="label">Status</span>
-            <strong>{run.status}</strong>
-          </div>
-          <div>
-            <span className="label">Stage</span>
-            <strong>{run.stage}</strong>
           </div>
           {run.fetch_summary ? (
-            <div>
-              <span className="label">Data Source</span>
-              <strong>{sourceLabel(run.fetch_summary.source)}</strong>
-              <small>{sourceNote(run.fetch_summary.source)}</small>
+            <div className="run-metrics">
+              <div className="run-metric" title={sourceNote(run.fetch_summary.source)}>
+                <span aria-hidden="true">◉</span>
+                <div>
+                  <small>Source</small>
+                  <strong>{sourceLabel(run.fetch_summary.source)}</strong>
+                </div>
+              </div>
+              <div className="run-metric">
+                <span aria-hidden="true">#</span>
+                <div>
+                  <small>Comments</small>
+                  <strong>
+                    {run.fetch_summary.max_comments_fetched} / {run.fetch_summary.max_comments_requested}
+                  </strong>
+                  <em>{run.fetch_summary.fetch_order}</em>
+                </div>
+              </div>
+              <div className="run-metric">
+                <span aria-hidden="true">↩</span>
+                <div>
+                  <small>Replies</small>
+                  <strong>{run.fetch_summary.fetched_reply_count} 件</strong>
+                  <em>{replyFetchModeLabel(run.fetch_summary.reply_fetch_mode)}</em>
+                </div>
+              </div>
+              <div className="run-metric run-metric--coverage" title={run.fetch_summary.coverage.message}>
+                <span aria-hidden="true">▣</span>
+                <div>
+                  <small>Coverage</small>
+                  <strong>{coverageLabel(run.fetch_summary.coverage.status)}</strong>
+                  <em>{run.fetch_summary.coverage.message}</em>
+                </div>
+              </div>
             </div>
           ) : null}
-          {run.fetch_summary ? (
-            <div>
-              <span className="label">Comments</span>
-              <strong>
-                {run.fetch_summary.max_comments_fetched} / {run.fetch_summary.max_comments_requested}
-              </strong>
-              <small>
-                {run.fetch_summary.fetch_order} / {replyFetchModeLabel(run.fetch_summary.reply_fetch_mode)}
-              </small>
-            </div>
-          ) : null}
-          {run.fetch_summary ? (
-            <div>
-              <span className="label">Replies</span>
-              <strong>{run.fetch_summary.fetched_reply_count} 件</strong>
-              <small>{replyFetchModeLabel(run.fetch_summary.reply_fetch_mode)}</small>
-            </div>
-          ) : null}
-          {run.fetch_summary ? (
-            <div>
-              <span className="label">Coverage</span>
-              <strong>{coverageLabel(run.fetch_summary.coverage.status)}</strong>
-              <small>{run.fetch_summary.coverage.message}</small>
-            </div>
-          ) : null}
-          <progress value={run.progress} max={1} />
+          <progress className="run-progress" value={run.progress} max={1} />
           {run.fetch_summary && run.fetch_summary.coverage.status !== "complete_or_near_complete" ? (
             <div className="status-warning">
               要求 {run.fetch_summary.max_comments_requested} 件 / 取得 {run.fetch_summary.max_comments_fetched} 件
@@ -1177,6 +1274,10 @@ export default function App() {
             <div>
               <h2>人物候補と alias</h2>
               <p>人物ごとに、その人物として数える表記をまとめています。採用済み表記だけで集計します。</p>
+              <AnalysisHelp>
+                最初に確認する画面です。タイトルやコメントから人物・グループ候補を作り、同じ人物を指す短い呼び名を alias としてまとめます。
+                ここで採用した人物と表記だけが、以降のランキングやコメント紐づけに使われます。
+              </AnalysisHelp>
             </div>
             <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
               候補を確定して集計
@@ -1190,19 +1291,77 @@ export default function App() {
             <span>人物外候補 {candidateSummary.nonPrimary} 件</span>
             {lastAction ? <em>{lastAction}</em> : null}
           </div>
+          <div className="accepted-keywords" aria-label="決定済み候補">
+            <div>
+              <span className="label">決定済み</span>
+              <strong>採用 {candidateSummary.accepted} / 除外 {candidateSummary.rejected}</strong>
+            </div>
+            <div className="accepted-keywords__list">
+              {decidedPrimaryCandidatePersons.slice(0, 14).map((person) => (
+                <button
+                  key={person.person_id}
+                  type="button"
+                  className={`keyword-chip keyword-chip--${person.status}`}
+                  onClick={() => {
+                    setCandidateEntityFilter("primary");
+                    setCandidateReviewIndex(
+                      Math.max(
+                        (candidates?.persons ?? [])
+                          .filter((candidate) => isPrimaryEntityType(candidate.entity_type))
+                          .findIndex((candidate) => candidate.person_id === person.person_id),
+                        0
+                      )
+                    );
+                  }}
+                >
+                  <span>{person.display_name}</span>
+                  <small>{person.status === "accepted" ? `${person.accepted_mention_comment_count}件` : "除外"}</small>
+                </button>
+              ))}
+              {decidedPrimaryCandidatePersons.length > 14 ? <span className="keyword-chip keyword-chip--more">+{decidedPrimaryCandidatePersons.length - 14}</span> : null}
+            </div>
+          </div>
           <div className="filter-bar">
             <label>
               候補の表示範囲
               <select value={candidateEntityFilter} onChange={(event) => setCandidateEntityFilter(event.target.value as CandidateEntityFilter)}>
+                <option value="needs_review">要確認のみ</option>
                 <option value="primary">人物・グループ・コンビのみ</option>
                 <option value="non_primary">人物外候補のみ</option>
                 <option value="all">すべて表示</option>
               </select>
             </label>
-            <small>channel など人物以外の候補は初期表示から分けています。</small>
+            <small>概要欄やタイトルで強く判定した人物は自動採用し、上の主要キーワードに常時表示します。</small>
+          </div>
+          <div className="candidate-deck">
+            <div>
+              <span className="label">Review Queue</span>
+              <strong>
+                {visibleCandidatePersons.length ? `${candidateReviewIndex + 1} / ${visibleCandidatePersons.length}` : "0 / 0"}
+              </strong>
+              <small>採用または除外すると、この表示範囲の次のカードに進みます。</small>
+            </div>
+            <div className="candidate-deck__actions">
+              <button
+                type="button"
+                className="choice-button"
+                disabled={candidateReviewIndex <= 0}
+                onClick={() => setCandidateReviewIndex((index) => Math.max(index - 1, 0))}
+              >
+                前へ
+              </button>
+              <button
+                type="button"
+                className="choice-button"
+                disabled={candidateReviewIndex >= visibleCandidatePersons.length - 1}
+                onClick={() => setCandidateReviewIndex((index) => Math.min(index + 1, visibleCandidatePersons.length - 1))}
+              >
+                次へ
+              </button>
+            </div>
           </div>
           <div className="candidate-grid">
-            {visibleCandidatePersons.map((person) => (
+            {(currentCandidatePerson ? [currentCandidatePerson] : []).map((person) => (
               <article className={`candidate-card candidate-card--${person.status}`} key={person.person_id}>
                 <div className="candidate-card__header">
                   <div>
@@ -1250,129 +1409,128 @@ export default function App() {
                     </button>
                   ) : null}
                 </div>
-                <div className="alias-editor" aria-label={`${person.display_name} の表示名と表記編集`}>
-                  <label>
-                    集計先の人物名
-                    <div className="inline-edit">
-                      <input
-                        value={displayNameDrafts[person.person_id] ?? person.display_name}
-                        onChange={(event) =>
-                          setDisplayNameDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
-                        }
-                      />
-                      <button
-                        type="button"
-                        disabled={
-                          busy ||
-                          !(displayNameDrafts[person.person_id] ?? person.display_name).trim() ||
-                          (displayNameDrafts[person.person_id] ?? person.display_name).trim() === person.display_name
-                        }
-                        onClick={() => updateDisplayName(person)}
-                      >
-                        更新
-                      </button>
-                    </div>
-                  </label>
-                  <label>
-                    この人物として数える表記を追加
-                    <div className="inline-edit">
-                      <input
-                        placeholder="例: 立野 / 沙紀 / みりちゃん"
-                        value={aliasDrafts[person.person_id] ?? ""}
-                        onChange={(event) =>
-                          setAliasDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
-                        }
-                      />
-                      <button type="button" disabled={busy || !(aliasDrafts[person.person_id] ?? "").trim()} onClick={() => addAlias(person)}>
-                        追加
-                      </button>
-                    </div>
-                  </label>
-                  <label>
-                    この候補を別人物へ統合
-                    <div className="inline-edit">
-                      <select
-                        value={mergeDrafts[person.person_id] ?? ""}
-                        onChange={(event) =>
-                          setMergeDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
-                        }
-                      >
-                        <option value="">統合先を選択</option>
-                        {(candidates?.persons ?? [])
-                          .filter((candidate) => candidate.person_id !== person.person_id && candidate.status !== "rejected")
-                          .map((candidate) => (
-                            <option key={candidate.person_id} value={candidate.person_id}>
-                              {candidate.display_name}
-                            </option>
-                          ))}
-                      </select>
-                      <button type="button" disabled={busy || !(mergeDrafts[person.person_id] ?? "")} onClick={() => mergePerson(person)}>
-                        統合
-                      </button>
-                    </div>
-                  </label>
+                <div className="alias-preview" aria-label={`${person.display_name} の集計表記プレビュー`}>
+                  {person.aliases
+                    .filter((alias) => alias.status === "accepted")
+                    .slice(0, 5)
+                    .map((alias) => (
+                      <span key={alias.alias_id}>{alias.alias_text}</span>
+                    ))}
+                  {person.aliases.filter((alias) => alias.status === "accepted").length > 5 ? (
+                    <span>+{person.aliases.filter((alias) => alias.status === "accepted").length - 5}</span>
+                  ) : null}
                 </div>
-                <div className="alias-list-heading">この人物として数える表記</div>
-                <ul className="alias-list">
-                  {person.aliases.map((alias) => (
-                    <li key={alias.alias_id}>
-                      <span>
-                        {alias.alias_text}
-                        <small>{aliasSourceLabel(alias.source)}</small>
-                      </span>
-                      <span>表記別 {alias.mention_comment_count}件</span>
-                      <span>{confidenceLabel("alias", alias.confidence)}</span>
-                      <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
-                      <button
-                        className={alias.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
-                        disabled={busy || alias.status === "accepted"}
-                        onClick={() =>
-                          updateCandidate(
-                            { type: "accept_alias", alias_id: alias.alias_id },
-                            `表記「${alias.alias_text}」を集計対象にしました`
-                          )
-                        }
-                      >
-                        {updatingId === alias.alias_id ? "処理中" : alias.status === "accepted" ? "集計中" : "集計に入れる"}
-                      </button>
-                      <button
-                        className={alias.status === "rejected" ? "choice-button choice-button--rejected" : "choice-button"}
-                        disabled={busy || alias.status === "rejected"}
-                        onClick={() =>
-                          updateCandidate(
-                            { type: "reject_alias", alias_id: alias.alias_id },
-                            `表記「${alias.alias_text}」を集計から外しました`
-                          )
-                        }
-                      >
-                        {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "外し済み" : "集計から外す"}
-                      </button>
-                      <button
-                        className="choice-button choice-button--danger"
-                        disabled={busy}
-                        onClick={() =>
-                          updateCandidate(
-                            { type: "delete_alias", alias_id: alias.alias_id },
-                            `表記「${alias.alias_text}」を削除しました`
-                          )
-                        }
-                      >
-                        削除
-                      </button>
-                      {alias.representative_comments.length ? (
-                        <details className="alias-evidence">
-                          <summary>代表コメント</summary>
-                          {alias.representative_comments.map((comment) => (
-                            <blockquote key={comment.comment_id}>
-                              {comment.text_original}
-                              <LikeCount count={comment.like_count} />
-                            </blockquote>
-                          ))}
-                        </details>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
+                <details className="candidate-details" open={person.status !== "accepted"}>
+                  <summary>表記・統合を編集</summary>
+                  <div className="alias-editor" aria-label={`${person.display_name} の表示名と表記編集`}>
+                    <label>
+                      集計先の人物名
+                      <div className="inline-edit">
+                        <input
+                          value={displayNameDrafts[person.person_id] ?? person.display_name}
+                          onChange={(event) =>
+                            setDisplayNameDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          disabled={
+                            busy ||
+                            !(displayNameDrafts[person.person_id] ?? person.display_name).trim() ||
+                            (displayNameDrafts[person.person_id] ?? person.display_name).trim() === person.display_name
+                          }
+                          onClick={() => updateDisplayName(person)}
+                        >
+                          更新
+                        </button>
+                      </div>
+                    </label>
+                    <label>
+                      この候補を別人物へ統合
+                      <div className="inline-edit">
+                        <select
+                          value={mergeDrafts[person.person_id] ?? ""}
+                          onChange={(event) =>
+                            setMergeDrafts((drafts) => ({ ...drafts, [person.person_id]: event.target.value }))
+                          }
+                        >
+                          <option value="">統合先を選択</option>
+                          {(candidates?.persons ?? [])
+                            .filter((candidate) => candidate.person_id !== person.person_id && candidate.status !== "rejected")
+                            .map((candidate) => (
+                              <option key={candidate.person_id} value={candidate.person_id}>
+                                {candidate.display_name}
+                              </option>
+                            ))}
+                        </select>
+                        <button type="button" disabled={busy || !(mergeDrafts[person.person_id] ?? "")} onClick={() => mergePerson(person)}>
+                          統合
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="alias-list-heading">この人物として数える表記</div>
+                  <ul className="alias-list">
+                    {person.aliases.map((alias) => (
+                      <li key={alias.alias_id}>
+                        <span>
+                          {alias.alias_text}
+                          <small>{aliasSourceLabel(alias.source)}</small>
+                        </span>
+                        <span>表記別 {alias.mention_comment_count}件</span>
+                        <span>{confidenceLabel("alias", alias.confidence)}</span>
+                        <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
+                        <button
+                          className={alias.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
+                          disabled={busy || alias.status === "accepted"}
+                          onClick={() =>
+                            updateCandidate(
+                              { type: "accept_alias", alias_id: alias.alias_id },
+                              `表記「${alias.alias_text}」を集計対象にしました`
+                            )
+                          }
+                        >
+                          {updatingId === alias.alias_id ? "処理中" : alias.status === "accepted" ? "集計中" : "集計に入れる"}
+                        </button>
+                        <button
+                          className={alias.status === "rejected" ? "choice-button choice-button--rejected" : "choice-button"}
+                          disabled={busy || alias.status === "rejected"}
+                          onClick={() =>
+                            updateCandidate(
+                              { type: "reject_alias", alias_id: alias.alias_id },
+                              `表記「${alias.alias_text}」を集計から外しました`
+                            )
+                          }
+                        >
+                          {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "外し済み" : "集計から外す"}
+                        </button>
+                        <button
+                          className="choice-button choice-button--danger"
+                          disabled={busy}
+                          onClick={() =>
+                            updateCandidate(
+                              { type: "delete_alias", alias_id: alias.alias_id },
+                              `表記「${alias.alias_text}」を削除しました`
+                            )
+                          }
+                        >
+                          削除
+                        </button>
+                        {alias.representative_comments.length ? (
+                          <details className="alias-evidence">
+                            <summary>代表コメント</summary>
+                            {alias.representative_comments.map((comment) => (
+                              <blockquote key={comment.comment_id}>
+                                {comment.text_original}
+                                <LikeCount count={comment.like_count} />
+                              </blockquote>
+                            ))}
+                          </details>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               </article>
             ))}
             {!visibleCandidatePersons.length ? <p className="empty-note">この表示範囲に該当する候補はありません。</p> : null}
@@ -1390,6 +1548,10 @@ export default function App() {
                 {report.fetch_summary.fetched_top_level_count + report.fetch_summary.fetched_reply_count} / YouTube表示:
                 {formatNullableNumber(report.video.youtube_comment_count)}
               </p>
+              <AnalysisHelp>
+                分析全体の入口です。取得できたコメント範囲、人物に紐づいたコメント数、上位人物、いいね分布をまとめて、
+                この run の信頼できる範囲と大まかな注目先を判断します。
+              </AnalysisHelp>
             </div>
           </div>
           <div className="dashboard-grid">
@@ -1525,8 +1687,8 @@ export default function App() {
                 </article>
               ))}
             </div>
-            <aside className="sections-box">
-              <h3>セクション状態</h3>
+            <details className="sections-box">
+              <summary>セクション状態</summary>
               {Object.entries(report.sections).map(([key, section]) => (
                 <div key={key}>
                   <span>{key}</span>
@@ -1534,7 +1696,7 @@ export default function App() {
                   {section.reason ? <small>{section.reason}</small> : null}
                 </div>
               ))}
-            </aside>
+            </details>
           </div>
         </section>
       ) : null}
@@ -1545,10 +1707,19 @@ export default function App() {
             <div>
               <h2>LLM 補助分析</h2>
               <p>Codex app server 経由で、候補整理、alias 補完案、曖昧コメントだけをレビュー補助します。</p>
+              <AnalysisHelp>
+                ルールベース集計だけでは迷いやすい候補統合、別表記、曖昧なコメントを AI が補助的に提案します。
+                件数集計そのものは deterministic な通常レポート側を正として扱います。
+              </AnalysisHelp>
             </div>
-            <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
-              {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
-            </button>
+            <div className="button-row">
+              <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
+                {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
+              </button>
+              <button type="button" disabled={busy || !report.llm_assist || report.llm_assist.status === "failed"} onClick={applyLlmAssist}>
+                分析に反映
+              </button>
+            </div>
           </div>
           {report.llm_assist ? (
             report.llm_assist.status === "failed" ? (
@@ -1621,6 +1792,10 @@ export default function App() {
             <div>
               <h2>要確認コメント</h2>
               <p>低 confidence、AI と辞書判定の差分、LLM が曖昧としたコメントをまとめます。</p>
+              <AnalysisHelp>
+                集計ミスになりやすいコメントだけを後から点検する画面です。低信頼、AI 提案との差分、人物なし判定の可能性をまとめ、
+                全コメントを読み直さずに品質確認できます。
+              </AnalysisHelp>
             </div>
             <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
               {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
@@ -1645,6 +1820,10 @@ export default function App() {
             <div>
               <h2>頻出語レビュー</h2>
               <p>人物候補と、既存 alias に入っていない頻出表記を分類します。alias に採用すると再集計します。</p>
+              <AnalysisHelp>
+                コメント内でよく出る表記のうち、まだ人物 alias として採用されていない語を見ます。
+                人名の短縮形なら alias に追加し、一般語なら除外に寄せることで次の集計を安定させます。
+              </AnalysisHelp>
             </div>
             <strong>{visibleAliasSuggestions.length + frequentReviewGroups.personCandidates.length} 件</strong>
           </div>
@@ -1719,6 +1898,10 @@ export default function App() {
             <div>
               <h2>人物別詳細</h2>
               <p>人物ごとの集計表記、特徴語、根拠コメントを確認します。</p>
+              <AnalysisHelp>
+                1 人ずつ、どの表記で拾われ、どんな言葉と一緒に語られ、どのコメントが根拠になっているかを確認します。
+                ランキングの理由を掘り下げるための画面です。
+              </AnalysisHelp>
             </div>
           </div>
           <div className="detail-layout">
@@ -1846,6 +2029,10 @@ export default function App() {
             <div>
               <h2>共起・関係性分析</h2>
               <p>同じコメント内で複数人物が言及された組み合わせを集計します。</p>
+              <AnalysisHelp>
+                同じコメントで一緒に語られる人物の組み合わせを見ます。比較、セット扱い、掛け合い、関係性への反応など、
+                単独ランキングでは見えないコメント欄の連想を確認できます。
+              </AnalysisHelp>
             </div>
             <strong>{report.cooccurrence.pairs.length} 組</strong>
           </div>
@@ -1903,6 +2090,10 @@ export default function App() {
               <p>
                 {report.clusters.method} / 設定 {report.clusters.requested_cluster_count} 件。本文特徴語で近いコメント群をまとめます。
               </p>
+              <AnalysisHelp>
+                似た内容のコメントを話題ごとにまとめます。誰が多いかだけでなく、コメント欄が何について盛り上がっているかを
+                ざっくり把握するための画面です。
+              </AnalysisHelp>
             </div>
             <strong>{report.clusters.clusters.length} 件</strong>
           </div>
@@ -1946,6 +2137,10 @@ export default function App() {
             <div>
               <h2>コメント一覧</h2>
               <p>コメント本文と紐づいた人物を確認します。検索と人物フィルタで根拠を絞り込めます。</p>
+              <AnalysisHelp>
+                集計結果の元になった個別コメントを確認します。検索、人物別、未紐づけで絞り込み、
+                必要に応じてコメント単位で人物紐づけを追加・解除できます。
+              </AnalysisHelp>
             </div>
             <strong>{filteredComments.length} / {report.comments.length} 件</strong>
           </div>
@@ -2167,6 +2362,15 @@ function QualityReviewList({ title, items }: { title: string; items: QualityRevi
   );
 }
 
+function AnalysisHelp({ children }: { children: ReactNode }) {
+  return (
+    <details className="analysis-help">
+      <summary aria-label="この分析の目的を開く">?</summary>
+      <p>{children}</p>
+    </details>
+  );
+}
+
 function LikeCount({ count, strong = false }: { count: number; strong?: boolean }) {
   const content = (
     <>
@@ -2187,6 +2391,22 @@ function statusLabel(status: string): string {
 
 function isPrimaryEntityType(entityType: string): boolean {
   return ["person", "group", "duo"].includes(entityType);
+}
+
+function needsCandidateReview(person: Person): boolean {
+  return person.status !== "accepted" || person.aliases.some((alias) => alias.status !== "accepted");
+}
+
+function shouldAdvanceCandidateCard(actionType: string): boolean {
+  return new Set([
+    "accept_person",
+    "reject_person",
+    "accept_alias",
+    "reject_alias",
+    "delete_alias",
+    "merge_person",
+    "split_merged_person"
+  ]).has(actionType);
 }
 
 function entityTypeLabel(entityType: string): string {
@@ -2220,6 +2440,26 @@ function sourceNote(source: string): string {
   if (source === "youtube_api_diff") return "YouTube APIから再取得し、既存cacheと重複排除して更新。";
   if (source === "fixture") return "API keyなしの検証データ。";
   return "";
+}
+
+function shortRunId(runId: string): string {
+  return runId.replace(/^run_/, "").slice(0, 8);
+}
+
+function runStatusLabel(status: string): string {
+  if (status === "waiting_for_review") return "レビュー待ち";
+  if (status === "completed") return "完了";
+  if (status === "running") return "実行中";
+  if (status === "failed_recoverable") return "復旧待ち";
+  return status;
+}
+
+function runStageLabel(stage: string): string {
+  if (stage === "extracting_candidates") return "候補抽出";
+  if (stage === "completed") return "集計完了";
+  if (stage === "fetching_comments") return "取得中";
+  if (stage === "creating_run") return "保存中";
+  return stage.replaceAll("_", " ");
 }
 
 function replyFetchModeLabel(mode: string): string {
