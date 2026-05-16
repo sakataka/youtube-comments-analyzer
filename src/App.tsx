@@ -276,6 +276,25 @@ export default function App() {
     };
   }, [report, selectedDetailPerson]);
 
+  const dashboardStats = useMemo(() => {
+    if (!report) return null;
+    const totalComments = report.fetch_summary.max_comments_fetched;
+    const replyCount = report.fetch_summary.fetched_reply_count;
+    const mentionedComments = report.comments.filter((comment) => comment.mentioned_persons.length > 0).length;
+    const unassignedComments = Math.max(report.comments.length - mentionedComments, 0);
+    const topPerson = report.rankings.mention_ranking[0] ?? null;
+    const maxMentionCount = Math.max(...report.rankings.mention_ranking.map((row) => row.mention_comment_count), 1);
+    return {
+      totalComments,
+      replyCount,
+      mentionedComments,
+      unassignedComments,
+      topPerson,
+      maxMentionCount,
+      acceptedPersons: report.persons.filter((person) => person.status === "accepted").length
+    };
+  }, [report]);
+
   useEffect(() => {
     void refreshRunHistory();
   }, []);
@@ -817,10 +836,10 @@ export default function App() {
       ) : null}
 
       {report ? (
-        <section className="panel">
+        <section className="panel dashboard-panel">
           <div className="section-heading">
             <div>
-              <h2>言及ランキング</h2>
+              <h2>概要ダッシュボード</h2>
               <p>
                 データソース: {sourceLabel(report.fetch_summary.source)} / 取得コメント:
                 {report.fetch_summary.fetched_top_level_count + report.fetch_summary.fetched_reply_count} / YouTube表示:
@@ -828,11 +847,16 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div className="report-summary-grid">
+          <div className="dashboard-grid">
             <div>
               <span className="label">動画</span>
               <strong>{report.video.title || report.video.youtube_video_id}</strong>
               <small>{report.video.channel_title || "チャンネル未取得"}</small>
+            </div>
+            <div>
+              <span className="label">採用人物</span>
+              <strong>{dashboardStats?.acceptedPersons ?? 0} 件</strong>
+              <small>ランキング対象</small>
             </div>
             <div>
               <span className="label">取得範囲</span>
@@ -850,6 +874,56 @@ export default function App() {
               <span className="label">返信</span>
               <strong>{report.fetch_summary.fetched_reply_count} 件</strong>
               <small>{replyFetchModeLabel(report.fetch_summary.reply_fetch_mode)}</small>
+            </div>
+            <div>
+              <span className="label">紐づけ済み</span>
+              <strong>{dashboardStats?.mentionedComments ?? 0} 件</strong>
+              <small>未紐づけ {dashboardStats?.unassignedComments ?? 0} 件</small>
+            </div>
+            <div>
+              <span className="label">トップ人物</span>
+              <strong>{dashboardStats?.topPerson?.display_name ?? "なし"}</strong>
+              <small>{dashboardStats?.topPerson ? `${dashboardStats.topPerson.mention_comment_count} 件` : "言及なし"}</small>
+            </div>
+          </div>
+          <div className="dashboard-charts">
+            <div className="mention-chart" aria-label="人物別言及数グラフ">
+              <div className="chart-header">
+                <strong>人物別言及数</strong>
+                <small>上位 {Math.min(report.rankings.mention_ranking.length, 10)} 件</small>
+              </div>
+              {report.rankings.mention_ranking.slice(0, 10).map((row) => (
+                <div className="mention-bar" key={row.person_id}>
+                  <span>{row.display_name}</span>
+                  <div>
+                    <i style={{ width: `${Math.max((row.mention_comment_count / (dashboardStats?.maxMentionCount ?? 1)) * 100, 4)}%` }} />
+                  </div>
+                  <strong>{row.mention_comment_count}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="comment-composition" aria-label="コメント分類比率">
+              <div className="chart-header">
+                <strong>コメント分類</strong>
+                <small>取得済みコメント内</small>
+              </div>
+              <div className="composition-meter">
+                <span
+                  style={{
+                    width: `${((dashboardStats?.mentionedComments ?? 0) / Math.max(dashboardStats?.totalComments ?? 1, 1)) * 100}%`
+                  }}
+                />
+                <em
+                  style={{
+                    width: `${((dashboardStats?.replyCount ?? 0) / Math.max(dashboardStats?.totalComments ?? 1, 1)) * 100}%`
+                  }}
+                />
+              </div>
+              <div className="composition-legend">
+                <span>人物紐づけ {dashboardStats?.mentionedComments ?? 0}</span>
+                <span>返信 {dashboardStats?.replyCount ?? 0}</span>
+                <span>未紐づけ {dashboardStats?.unassignedComments ?? 0}</span>
+              </div>
             </div>
           </div>
           <div className="like-distribution" aria-label="いいね数分布">
@@ -869,6 +943,12 @@ export default function App() {
                   <strong>{bucket.count}</strong>
                 </div>
               ))}
+            </div>
+          </div>
+          <div className="section-heading section-heading--compact">
+            <div>
+              <h2>言及ランキング</h2>
+              <p>代表コメントと weighted score を確認します。</p>
             </div>
           </div>
           <div className="report-layout">

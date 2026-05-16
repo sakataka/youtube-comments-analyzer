@@ -488,14 +488,14 @@ h4 {
   grid-template-columns: minmax(0, 1fr) 280px;
 }
 
-.report-summary-grid {
+.dashboard-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0 0 16px;
 }
 
-.report-summary-grid > div,
+.dashboard-grid > div,
 .like-distribution {
   background: #f8fafc;
   border: 1px solid #dfe6ef;
@@ -503,15 +503,106 @@ h4 {
   padding: 12px;
 }
 
-.report-summary-grid strong {
+.dashboard-grid strong {
   display: block;
 }
 
-.report-summary-grid small {
+.dashboard-grid small {
   color: #697789;
   display: block;
   line-height: 1.45;
   margin-top: 4px;
+}
+
+.dashboard-charts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  margin: 0 0 16px;
+}
+
+.mention-chart,
+.comment-composition {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.chart-header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+}
+
+.chart-header small {
+  color: #697789;
+  font-weight: 700;
+}
+
+.mention-bar {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(88px, 150px) minmax(0, 1fr) 42px;
+}
+
+.mention-bar span {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-bar div {
+  background: #e6edf7;
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.mention-bar i {
+  background: #175ddc;
+  display: block;
+  height: 100%;
+}
+
+.composition-meter {
+  background: #e6edf7;
+  border-radius: 999px;
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+}
+
+.composition-meter span {
+  background: #178248;
+}
+
+.composition-meter em {
+  background: #f0b429;
+}
+
+.composition-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composition-legend span {
+  background: #fff;
+  border: 1px solid #dce5ef;
+  border-radius: 999px;
+  color: #435264;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.section-heading--compact {
+  margin-top: 18px;
 }
 
 .like-distribution {
@@ -766,7 +857,8 @@ blockquote {
 @media (max-width: 760px) {
   .hero,
   .status-panel,
-  .report-summary-grid,
+  .dashboard-grid,
+  .dashboard-charts,
   .llm-assist-grid,
   .report-layout,
   .detail-layout,
