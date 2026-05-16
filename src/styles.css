@@ -103,6 +103,24 @@ select {
   padding: 0 12px;
 }
 
+.checkbox-label {
+  align-items: start;
+  gap: 4px 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.checkbox-label input {
+  margin-top: 3px;
+  min-height: 0;
+}
+
+.checkbox-label small {
+  color: #697789;
+  font-weight: 700;
+  grid-column: 2;
+  line-height: 1.45;
+}
+
 .panel {
   margin-top: 18px;
   padding: 20px;

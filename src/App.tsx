@@ -195,7 +195,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export default function App() {
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=vlpLbiqNhLo");
   const [maxComments, setMaxComments] = useState(5000);
-  const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset">("none");
+  const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset" | "full">("none");
+  const [forceRefresh, setForceRefresh] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
   const [runHistory, setRunHistory] = useState<RunState[]>([]);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
@@ -327,7 +328,7 @@ export default function App() {
       setReport(nextReport);
       setUrl(state.video?.url ?? url);
       setMaxComments(state.fetch_summary?.max_comments_requested ?? maxComments);
-      setReplyFetchMode((state.fetch_summary?.reply_fetch_mode as "none" | "inline_subset") ?? replyFetchMode);
+      setReplyFetchMode((state.fetch_summary?.reply_fetch_mode as "none" | "inline_subset" | "full") ?? replyFetchMode);
       setLastAction("過去分析を読み込みました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -350,6 +351,7 @@ export default function App() {
           max_comments: maxComments,
           reply_fetch_mode: replyFetchMode,
           fetch_order: "relevance",
+          force_refresh: forceRefresh,
           use_llm: false,
           use_embeddings: false
         })
@@ -544,10 +546,16 @@ export default function App() {
           </label>
           <label>
             返信コメント
-            <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset")}>
+            <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
               <option value="none">トップレベルのみ</option>
               <option value="inline_subset">API同梱分を含める</option>
+              <option value="full">返信を全件取得</option>
             </select>
+          </label>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
+            差分更新する
+            <small>同条件 cache があっても YouTube API を再取得し、重複を除いて cache を更新します。</small>
           </label>
           <button type="submit" disabled={busy}>
             {busy ? "処理中" : "分析を開始"}
@@ -1312,6 +1320,7 @@ function normalizeSearch(value: string): string {
 function sourceLabel(source: string): string {
   if (source === "cache") return "Cache";
   if (source === "youtube_api") return "YouTube API";
+  if (source === "youtube_api_diff") return "YouTube API 差分更新";
   if (source === "fixture") return "Fixture";
   return source;
 }
@@ -1319,6 +1328,7 @@ function sourceLabel(source: string): string {
 function sourceNote(source: string): string {
   if (source === "cache") return "保存済みデータを使用。API再消費なし。";
   if (source === "youtube_api") return "今回YouTube APIから取得。次回同条件はcache使用。";
+  if (source === "youtube_api_diff") return "YouTube APIから再取得し、既存cacheと重複排除して更新。";
   if (source === "fixture") return "API keyなしの検証データ。";
   return "";
 }

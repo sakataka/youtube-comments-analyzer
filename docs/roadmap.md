@@ -132,6 +132,15 @@ URL 入力
 - コメント分類比率の簡易グラフ
 - 既存のいいね数分布グラフとランキングを同じ report 面に配置
 
+### Step 7: Phase 6 full 返信取得・差分更新
+
+- `reply_fetch_mode=full`
+- `comments.list` による返信 full 取得
+- full 返信を候補抽出・分類・レポート対象に含める
+- 差分更新 option
+- live API 再取得結果と既存 cache の `comment_id` 重複排除 merge
+- 差分更新時の Data Source 表示
+
 ## 状況詳細
 
 ### 動画・取得概要
@@ -190,18 +199,19 @@ URL 入力
 - max comments `5000`
 - `reply_fetch_mode=none`
 - `reply_fetch_mode=inline_subset`
+- `reply_fetch_mode=full`
 - `commentThreads.list` に同梱される返信コメントの保存
+- `comments.list` による返信 full 取得
 - 返信コメントを候補抽出・分類・レポート対象に含める
 - 返信コメントの UI 表示
 - cache
+- 差分更新
 - 取得エラーの UI 表示
 - 取得済みコメント一覧表示
 
-後続フェーズへ移動:
+未完了:
 
-- `reply_fetch_mode=full`
-- `comments.list` による返信 full 取得
-- 差分更新
+- なし
 
 ### レポート UI
 
@@ -285,8 +295,9 @@ YouTube API quota 消費が増えるため、cache と取得概要 UI が安定�
 
 ## 次に進める順番
 
-1. Phase 6: `reply_fetch_mode=full`
-2. Phase 6: 差分更新
+1. MVP-1: 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI
+2. MVP-1: LLM 失敗時の部分 degraded report
+3. MVP-1: 魅力カテゴリ分類・人物別要約
 
 MVP-2 の高度分析は一旦保留です。
 
@@ -300,8 +311,6 @@ MVP-2 の高度分析は一旦保留です。
 - クラスタ名生成
 - 共起ネットワーク
 - 関係性分析
-- 差分更新
-- 返信コメント full 取得
 - 低信頼レビュー画面
 
 ### 分析品質
@@ -324,18 +333,19 @@ MVP-2 の高度分析は一旦保留です。
 
 優先順位は次の順です。
 
-1. LLM なしの MVP-0 を初期検証動画で人間確認し、alias 誤爆を修正する。
-2. MVP-1 の LLM 候補整理、曖昧コメント分類、人物別要約へ進む。
-3. Phase 7 の過去分析一覧、概要ダッシュボード、グラフへ進む。
-4. Phase 6 の full 返信取得と差分更新へ進む。
+1. 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI。
+2. LLM 失敗時の部分 degraded report。
+3. 魅力カテゴリ分類・人物別要約。
+4. low confidence comments 表示。
 
 ## 完了判定
 
-MVP-0 は要求仕様書上の vertical slice と usable review flow を満たす状態です。追加改善として次はまだ余地があります。
+MVP-0 は要求仕様書上の vertical slice と usable review flow を満たす状態です。Step 1 から Step 7 までの今回目標も完了済みです。追加改善として次はまだ余地があります。
 
 - 主要人物候補の自動抽出精度
 - ユーザーが 1 分以内に候補確認を終えられる UI
 - entity_type ごとの折りたたみ
-- LLM による曖昧候補整理
+- 頻出語レビュー UI
+- LLM 失敗時の degraded report
 
-そのため、現状は `MVP-0 usable review flow complete`、次の目標は `MVP-1 LLM-assisted analysis` とします。
+そのため、現状は `Step 1-7 complete`、次の目標候補は `MVP-1 review quality improvements` とします。

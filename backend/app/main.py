@@ -39,6 +39,7 @@ class RunCreateRequest(BaseModel):
     max_comments: int = Field(default=5000, ge=1, le=5000)
     reply_fetch_mode: Literal["none", "inline_subset", "full"] = "none"
     fetch_order: Literal["relevance", "time"] = "relevance"
+    force_refresh: bool = False
     use_llm: bool = False
     use_embeddings: bool = False
 
@@ -80,6 +81,7 @@ def create_run(request: RunCreateRequest) -> dict[str, str]:
                 max_comments=request.max_comments,
                 fetch_order=request.fetch_order,
                 reply_fetch_mode=request.reply_fetch_mode,
+                force_refresh=request.force_refresh,
             ),
         )
         run_id = store.create_run(bundle, request.model_dump())

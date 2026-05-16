@@ -111,6 +111,7 @@ class FetchConfig:
     max_comments: int = 1000
     fetch_order: str = "relevance"
     reply_fetch_mode: str = "none"
+    force_refresh: bool = False
 
 
 class YouTubeCommentClient:
@@ -121,22 +122,28 @@ class YouTubeCommentClient:
 
     def fetch_video_bundle(self, url: str, config: FetchConfig) -> dict[str, Any]:
         video_id = parse_youtube_video_id(url)
-        if config.reply_fetch_mode == "full":
-            raise RuntimeError("reply_fetch_mode=full は未実装です。inline_subset または none を指定してください。")
         cache_file = self._cache_file(video_id, config)
-        if cache_file.exists():
+        if cache_file.exists() and not config.force_refresh:
             comments = self._read_jsonl(cache_file)
             metadata = self._read_metadata(cache_file)
             return self._bundle(url, video_id, metadata, comments, "cache")
 
         api_key = os.getenv("YOUTUBE_API_KEY")
         if api_key:
+            cached_comments = self._read_jsonl(cache_file) if cache_file.exists() else []
             bundle = self._fetch_live(api_key, url, video_id, config)
+            if cached_comments and config.force_refresh:
+                bundle["comments"] = merge_comments(cached_comments, bundle["comments"], config.fetch_order)
+                bundle = self._bundle(url, video_id, bundle["video"], bundle["comments"], "youtube_api_diff")
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             self._write_jsonl(cache_file, bundle["comments"])
             self._write_metadata(cache_file, bundle["video"])
-            bundle["fetch_summary"]["source"] = "youtube_api"
             return bundle
+
+        if cache_file.exists():
+            comments = self._read_jsonl(cache_file)
+            metadata = self._read_metadata(cache_file)
+            return self._bundle(url, video_id, metadata, comments, "cache")
 
         comments = self._read_jsonl(self.fixture_path)
         metadata = {
@@ -161,7 +168,7 @@ class YouTubeCommentClient:
         while len(comments) < config.max_comments:
             query = {
                 "key": api_key,
-                "part": "snippet,replies" if config.reply_fetch_mode == "inline_subset" else "snippet",
+                "part": "snippet,replies" if config.reply_fetch_mode in {"inline_subset", "full"} else "snippet",
                 "videoId": video_id,
                 "maxResults": min(100, config.max_comments - len(comments)),
                 "textFormat": "plainText",
@@ -180,12 +187,61 @@ class YouTubeCommentClient:
                             break
                         comments.append(reply)
                         source_order += 1
+                elif config.reply_fetch_mode == "full" and top_level["reply_count"] > 0:
+                    replies = self._fetch_replies_live(
+                        api_key=api_key,
+                        parent_comment_id=top_level["comment_id"],
+                        first_source_order=source_order,
+                        fetch_order=config.fetch_order,
+                        max_replies=config.max_comments - len(comments),
+                    )
+                    comments.extend(replies)
+                    source_order += len(replies)
                 if len(comments) >= config.max_comments:
                     break
             page_token = payload.get("nextPageToken")
             if not page_token:
                 break
         return self._bundle(url, video_id, video, comments, "youtube_api")
+
+    def _fetch_replies_live(
+        self,
+        api_key: str,
+        parent_comment_id: str,
+        first_source_order: int,
+        fetch_order: str,
+        max_replies: int,
+    ) -> list[dict[str, Any]]:
+        replies: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while len(replies) < max_replies:
+            query = {
+                "key": api_key,
+                "part": "snippet",
+                "parentId": parent_comment_id,
+                "maxResults": min(100, max_replies - len(replies)),
+                "textFormat": "plainText",
+            }
+            if page_token:
+                query["pageToken"] = page_token
+            payload = self._get_json("https://www.googleapis.com/youtube/v3/comments", query)
+            for item in payload.get("items", []):
+                replies.append(
+                    comment_from_snippet(
+                        comment_id=item["id"],
+                        snippet=item["snippet"],
+                        source_order=first_source_order + len(replies),
+                        fetch_order=fetch_order,
+                        parent_comment_id=parent_comment_id,
+                        is_reply=True,
+                    )
+                )
+                if len(replies) >= max_replies:
+                    break
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
+        return replies
 
     def _fetch_video_metadata(self, api_key: str, url: str, video_id: str) -> dict[str, Any]:
         payload = self._get_json("https://www.googleapis.com/youtube/v3/videos", {
@@ -275,3 +331,22 @@ class YouTubeCommentClient:
             json.dumps(metadata, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+def merge_comments(
+    cached_comments: list[dict[str, Any]],
+    fresh_comments: list[dict[str, Any]],
+    fetch_order: str,
+) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for comment in [*fresh_comments, *cached_comments]:
+        comment_id = comment.get("comment_id")
+        if not comment_id or comment_id in seen:
+            continue
+        seen.add(comment_id)
+        merged.append(dict(comment))
+    for index, comment in enumerate(merged):
+        comment["source_order"] = index
+        comment["api_relevance_order"] = index if fetch_order == "relevance" else None
+    return merged
