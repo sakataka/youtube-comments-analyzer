@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from itertools import combinations
 from typing import Any
@@ -18,6 +19,32 @@ APPEAL_CATEGORIES = [
 TONE_KEYWORDS = {
     "positive": ["好き", "最高", "良い", "いい", "素敵", "尊敬", "面白", "かわい", "可愛", "綺麗", "すご", "推し"],
     "negative": ["嫌い", "苦手", "つまら", "無理", "怖い", "ひどい", "炎上", "嫌"],
+}
+
+CLUSTER_DEFINITIONS = [
+    ("humor", "笑い・ツッコミ", ["面白", "おもしろ", "笑", "草", "ツッコミ", "ボケ", "キングボンビー"]),
+    ("praise", "称賛・好意", ["好き", "最高", "良い", "いい", "素敵", "尊敬", "かわい", "可愛", "綺麗", "すご"]),
+    ("relationship", "掛け合い・関係性", ["絡み", "コンビ", "フォロー", "助け", "支え", "バランス", "空気"]),
+    ("talk", "トーク・エピソード", ["トーク", "エピソード", "返し", "平場", "コメント", "話"]),
+    ("growth", "成長・頑張り", ["成長", "頑張", "がんば", "努力", "本気", "デビュー"]),
+    ("appearance", "ビジュアル", ["かわい", "可愛", "綺麗", "きれい", "美人", "ビジュ", "顔"]),
+    ("scene", "場面・引用", [":", "：", "Fire", "だぁ", "泣", "ゲーム", "スマブラ"]),
+    ("concern", "注意・違和感", ["嫌", "苦手", "怖い", "無理", "つまら", "ひどい"]),
+]
+
+CLUSTER_STOPWORDS = {
+    "これ",
+    "それ",
+    "動画",
+    "コメント",
+    "ちゃん",
+    "さん",
+    "みたい",
+    "すぎる",
+    "めっちゃ",
+    "今回",
+    "ところ",
+    "感じ",
 }
 
 
@@ -297,6 +324,112 @@ def build_cooccurrence_matrix(pair_rows: list[dict[str, Any]]) -> list[dict[str,
     ]
 
 
+def build_comment_clusters(
+    comments: list[Any],
+    mentions_by_comment: dict[str, dict[str, str]],
+    requested_cluster_count: int,
+) -> dict[str, Any]:
+    cluster_count = min(12, max(5, int(requested_cluster_count or 8)))
+    buckets: dict[str, dict[str, Any]] = {
+        cluster_id: {
+            "cluster_id": cluster_id,
+            "label": label,
+            "comments": [],
+            "keywords": keywords,
+        }
+        for cluster_id, label, keywords in CLUSTER_DEFINITIONS
+    }
+    buckets["other"] = {"cluster_id": "other", "label": "その他・要確認", "comments": [], "keywords": []}
+
+    for comment in comments:
+        cluster_id = best_cluster_id(comment["text_original"])
+        buckets[cluster_id]["comments"].append(comment)
+
+    non_empty = [bucket for bucket in buckets.values() if bucket["comments"]]
+    non_empty.sort(key=lambda bucket: len(bucket["comments"]), reverse=True)
+    selected = non_empty[:cluster_count]
+    overflow = non_empty[cluster_count:]
+    if overflow:
+        other = next((bucket for bucket in selected if bucket["cluster_id"] == "other"), None)
+        if not other:
+            other = {"cluster_id": "other", "label": "その他・要確認", "comments": [], "keywords": []}
+            selected.append(other)
+        for bucket in overflow:
+            other["comments"].extend(bucket["comments"])
+
+    clusters = []
+    for bucket in selected:
+        bucket_comments = bucket["comments"]
+        top_persons = top_cluster_persons(bucket_comments, mentions_by_comment)
+        top_keywords = top_cluster_keywords(bucket_comments, bucket["keywords"])
+        clusters.append({
+            "cluster_id": bucket["cluster_id"],
+            "label": bucket["label"],
+            "comment_count": len(bucket_comments),
+            "top_persons": top_persons,
+            "top_keywords": top_keywords,
+            "summary": cluster_summary_text(bucket["label"], top_persons, top_keywords),
+            "representative_comments": [
+                {
+                    "comment_id": comment["id"],
+                    "text_original": comment["text_original"],
+                    "like_count": comment["like_count"],
+                }
+                for comment in sorted(bucket_comments, key=lambda item: int(item["like_count"]), reverse=True)[:4]
+            ],
+        })
+    clusters.sort(key=lambda cluster: cluster["comment_count"], reverse=True)
+    return {
+        "method": "keyword_features",
+        "requested_cluster_count": cluster_count,
+        "clusters": clusters,
+    }
+
+
+def best_cluster_id(text: str) -> str:
+    scores = []
+    for cluster_id, _label, keywords in CLUSTER_DEFINITIONS:
+        score = sum(1 for keyword in keywords if keyword in text)
+        scores.append((score, cluster_id))
+    score, cluster_id = max(scores, key=lambda item: item[0])
+    return cluster_id if score > 0 else "other"
+
+
+def top_cluster_persons(comments: list[Any], mentions_by_comment: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    counts: defaultdict[str, int] = defaultdict(int)
+    for comment in comments:
+        for display_name in mentions_by_comment[comment["id"]].values():
+            counts[display_name] += 1
+    return [
+        {"display_name": display_name, "count": count}
+        for display_name, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:5]
+    ]
+
+
+def top_cluster_keywords(comments: list[Any], seed_keywords: list[str]) -> list[dict[str, Any]]:
+    counts: defaultdict[str, int] = defaultdict(int)
+    for keyword in seed_keywords:
+        if keyword:
+            counts[keyword] += 1
+    for comment in comments:
+        for token in re.findall(r"[一-龥々ぁ-んァ-ヶーA-Za-z]{2,16}", comment["text_original"]):
+            if token in CLUSTER_STOPWORDS:
+                continue
+            if re.fullmatch(r"[ぁ-んー]+", token) and len(token) >= 5:
+                continue
+            counts[token] += 1
+    return [
+        {"term": term, "count": count}
+        for term, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:8]
+    ]
+
+
+def cluster_summary_text(label: str, top_persons: list[dict[str, Any]], top_keywords: list[dict[str, Any]]) -> str:
+    person_text = "、".join(person["display_name"] for person in top_persons[:3]) or "特定人物なし"
+    keyword_text = "、".join(keyword["term"] for keyword in top_keywords[:3]) or "特徴語なし"
+    return f"{label} に関するコメント群です。主な人物は {person_text}、主な語は {keyword_text} です。"
+
+
 def build_report_payload(
     run_id: str,
     video: Any,
@@ -311,6 +444,7 @@ def build_report_payload(
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
     appeal_summary = build_appeal_summary(mentions)
     cooccurrence = build_cooccurrence(mentions)
+    clusters = build_comment_clusters(comments, mentions_by_comment, int(analysis_config.get("cluster_count", 8)))
     llm_section = llm_section_status(llm_assist)
     return {
         "schema_version": "report.v1",
@@ -345,6 +479,7 @@ def build_report_payload(
         "llm_assist": llm_assist,
         "appeal_summary": appeal_summary,
         "cooccurrence": cooccurrence,
+        "clusters": clusters,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -373,7 +508,7 @@ def build_report_payload(
                 else {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"}
             ),
             "cooccurrence": {"status": "available"},
-            "clusters": {"status": "skipped", "reason": "Embeddings disabled in MVP-0"},
+            "clusters": {"status": "available"},
         },
     }
 

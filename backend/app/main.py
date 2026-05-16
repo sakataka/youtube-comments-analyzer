@@ -37,6 +37,7 @@ class InspectRequest(BaseModel):
 class RunCreateRequest(BaseModel):
     url: str
     max_comments: int = Field(default=5000, ge=1, le=5000)
+    cluster_count: int = Field(default=8, ge=5, le=12)
     reply_fetch_mode: Literal["none", "inline_subset", "full"] = "none"
     fetch_order: Literal["relevance", "time"] = "relevance"
     force_refresh: bool = False

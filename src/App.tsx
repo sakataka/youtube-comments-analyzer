@@ -174,6 +174,20 @@ type CooccurrencePair = {
   }>;
 };
 
+type CommentCluster = {
+  cluster_id: string;
+  label: string;
+  comment_count: number;
+  top_persons: Array<{ display_name: string; count: number }>;
+  top_keywords: Array<{ term: string; count: number }>;
+  summary: string;
+  representative_comments: Array<{
+    comment_id: string;
+    text_original: string;
+    like_count: number;
+  }>;
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -212,6 +226,11 @@ type Report = {
       targets: Array<{ target: string; count: number }>;
     }>;
   };
+  clusters: {
+    method: string;
+    requested_cluster_count: number;
+    clusters: CommentCluster[];
+  };
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -226,7 +245,7 @@ type Report = {
   }>;
 };
 
-type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "cooccurrence" | "comments";
+type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -246,6 +265,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export default function App() {
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=vlpLbiqNhLo");
   const [maxComments, setMaxComments] = useState(5000);
+  const [clusterCount, setClusterCount] = useState(8);
   const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset" | "full">("none");
   const [forceRefresh, setForceRefresh] = useState(false);
   const [activeTab, setActiveTab] = useState<ResultTab>("candidates");
@@ -418,6 +438,7 @@ export default function App() {
         body: JSON.stringify({
           url,
           max_comments: maxComments,
+          cluster_count: clusterCount,
           reply_fetch_mode: replyFetchMode,
           fetch_order: "relevance",
           force_refresh: forceRefresh,
@@ -628,6 +649,17 @@ export default function App() {
             />
           </label>
           <label>
+            クラスタ数
+            <input
+              type="number"
+              min="5"
+              max="12"
+              value={clusterCount}
+              onChange={(event) => setClusterCount(Number(event.target.value))}
+            />
+            <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
+          </label>
+          <label>
             返信コメント
             <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
               <option value="none">トップレベルのみ</option>
@@ -811,6 +843,14 @@ export default function App() {
             disabled={!report}
           >
             関係性
+          </button>
+          <button
+            type="button"
+            className={activeTab === "clusters" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("clusters")}
+            disabled={!report}
+          >
+            クラスタ
           </button>
           <button
             type="button"
@@ -1452,6 +1492,51 @@ export default function App() {
                 </div>
               ))}
             </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {report && activeTab === "clusters" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>コメントクラスタ</h2>
+              <p>
+                {report.clusters.method} / 設定 {report.clusters.requested_cluster_count} 件。本文特徴語で近いコメント群をまとめます。
+              </p>
+            </div>
+            <strong>{report.clusters.clusters.length} 件</strong>
+          </div>
+          <div className="cluster-grid">
+            {report.clusters.clusters.map((cluster) => (
+              <article className="cluster-card" key={cluster.cluster_id}>
+                <div className="cluster-card__header">
+                  <div>
+                    <h3>{cluster.label}</h3>
+                    <p>{cluster.summary}</p>
+                  </div>
+                  <strong>{cluster.comment_count}</strong>
+                </div>
+                <div className="cluster-pills">
+                  {cluster.top_persons.map((person) => (
+                    <span key={person.display_name}>
+                      {person.display_name} {person.count}
+                    </span>
+                  ))}
+                </div>
+                <div className="cluster-keywords">
+                  {cluster.top_keywords.map((keyword) => (
+                    <span key={keyword.term}>{keyword.term}</span>
+                  ))}
+                </div>
+                {cluster.representative_comments.slice(0, 3).map((comment) => (
+                  <blockquote key={comment.comment_id}>
+                    {comment.text_original}
+                    <small>{comment.like_count} likes</small>
+                  </blockquote>
+                ))}
+              </article>
+            ))}
           </div>
         </section>
       ) : null}

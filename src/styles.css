@@ -1072,6 +1072,76 @@ h4 {
   justify-content: center;
 }
 
+.cluster-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.cluster-card {
+  background: #fbfcfe;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.cluster-card__header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.cluster-card__header p {
+  color: #647181;
+  line-height: 1.55;
+  margin: 4px 0 0;
+}
+
+.cluster-card__header > strong {
+  background: #172026;
+  border-radius: 8px;
+  color: #fff;
+  padding: 6px 10px;
+}
+
+.cluster-pills,
+.cluster-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cluster-pills span,
+.cluster-keywords span {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+
+.cluster-pills span {
+  background: #e8f1ff;
+  border: 1px solid #bfd6ff;
+  color: #154c9f;
+}
+
+.cluster-keywords span {
+  background: #fff7e5;
+  border: 1px solid #f0d49b;
+  color: #6d4a00;
+}
+
+.cluster-card small {
+  color: #697789;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
 .ranking-row {
   border: 1px solid #dfe6ef;
   border-radius: 8px;

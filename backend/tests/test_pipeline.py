@@ -51,6 +51,7 @@ class PipelineTest(unittest.TestCase):
                 bundle,
                 {
                     "max_comments": 1000,
+                    "cluster_count": 8,
                     "reply_fetch_mode": "none",
                     "fetch_order": "relevance",
                     "use_llm": False,
@@ -94,6 +95,9 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(report["sections"]["cooccurrence"]["status"], "available")
             self.assertIn("pairs", report["cooccurrence"])
             self.assertIn("matrix", report["cooccurrence"])
+            self.assertEqual(report["sections"]["clusters"]["status"], "available")
+            self.assertGreaterEqual(report["clusters"]["requested_cluster_count"], 5)
+            self.assertGreater(len(report["clusters"]["clusters"]), 0)
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)
