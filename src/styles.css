@@ -112,7 +112,15 @@ select {
   align-items: center;
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 180px;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) 180px;
+}
+
+.status-panel small {
+  color: #697789;
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 4px;
 }
 
 .label {

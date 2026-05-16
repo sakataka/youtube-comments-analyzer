@@ -752,12 +752,21 @@ class AnalysisStore:
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
+        snapshot = self.conn.execute("select * from comment_snapshots where id = ?", (run["comment_snapshot_id"],)).fetchone()
         return {
             "run_id": run["id"],
             "status": run["status"],
             "stage": run["stage"],
             "progress": run["progress"],
             "error_message": run["error_message"],
+            "fetch_summary": {
+                "source": snapshot["source"],
+                "max_comments_requested": snapshot["max_comments_requested"],
+                "max_comments_fetched": snapshot["max_comments_fetched"],
+                "fetch_order": snapshot["fetch_order"],
+                "reply_fetch_mode": snapshot["reply_fetch_mode"],
+                "fetched_at": snapshot["fetched_at"],
+            },
         }
 
     def get_run_row(self, run_id: str) -> sqlite3.Row:

@@ -99,6 +99,8 @@ URL 入力
 - fetch order
 - reply fetch mode
 - source fixture / cache / youtube_api
+- cache / YouTube API / fixture の UI 表示
+- cache 使用時の API 再消費なし表示
 
 未完了:
 
@@ -216,8 +218,8 @@ URL 入力
 優先順位は次の順です。
 
 1. 候補確認 UI に merge を追加する。
-2. 取得エラーと cache 利用状況を UI に明示する。
-3. 人物別詳細画面で特徴語と代表コメントを表示する。
+2. 人物別詳細画面で特徴語と代表コメントを表示する。
+3. 取得エラー詳細と API で全件取得できない場合の表示を強化する。
 4. LLM なしの MVP-0 を一度初期検証動画で人間確認し、alias 誤爆を修正する。
 5. その後に MVP-1 の LLM 候補整理と曖昧コメント分類へ進む。
 

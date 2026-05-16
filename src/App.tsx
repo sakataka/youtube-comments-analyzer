@@ -6,6 +6,14 @@ type RunState = {
   stage: string;
   progress: number;
   error_message?: string | null;
+  fetch_summary?: {
+    source: string;
+    max_comments_requested: number;
+    max_comments_fetched: number;
+    fetch_order: string;
+    reply_fetch_mode: string;
+    fetched_at: string;
+  };
 };
 
 type Alias = {
@@ -301,6 +309,24 @@ export default function App() {
             <span className="label">Stage</span>
             <strong>{run.stage}</strong>
           </div>
+          {run.fetch_summary ? (
+            <div>
+              <span className="label">Data Source</span>
+              <strong>{sourceLabel(run.fetch_summary.source)}</strong>
+              <small>{sourceNote(run.fetch_summary.source)}</small>
+            </div>
+          ) : null}
+          {run.fetch_summary ? (
+            <div>
+              <span className="label">Comments</span>
+              <strong>
+                {run.fetch_summary.max_comments_fetched} / {run.fetch_summary.max_comments_requested}
+              </strong>
+              <small>
+                {run.fetch_summary.fetch_order} / {run.fetch_summary.reply_fetch_mode}
+              </small>
+            </div>
+          ) : null}
           <progress value={run.progress} max={1} />
         </section>
       ) : null}
@@ -598,6 +624,20 @@ function statusLabel(status: string): string {
 
 function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function sourceLabel(source: string): string {
+  if (source === "cache") return "Cache";
+  if (source === "youtube_api") return "YouTube API";
+  if (source === "fixture") return "Fixture";
+  return source;
+}
+
+function sourceNote(source: string): string {
+  if (source === "cache") return "保存済みデータを使用。API再消費なし。";
+  if (source === "youtube_api") return "今回YouTube APIから取得。次回同条件はcache使用。";
+  if (source === "fixture") return "API keyなしの検証データ。";
+  return "";
 }
 
 function aliasSourceLabel(source: string): string {
