@@ -91,7 +91,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function App() {
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=vlpLbiqNhLo");
-  const [maxComments, setMaxComments] = useState(1000);
+  const [maxComments, setMaxComments] = useState(5000);
   const [run, setRun] = useState<RunState | null>(null);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
@@ -185,7 +185,7 @@ export default function App() {
             <input
               type="number"
               min="1"
-              max="1000"
+              max="5000"
               value={maxComments}
               onChange={(event) => setMaxComments(Number(event.target.value))}
             />

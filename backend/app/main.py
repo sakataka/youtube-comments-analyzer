@@ -13,8 +13,8 @@ from .youtube import FetchConfig, YouTubeCommentClient, parse_youtube_video_id
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-DATA_DIR = Path(os.getenv("DATA_DIR", ROOT_DIR / "data"))
-DB_PATH = Path(os.getenv("DATABASE_URL", DATA_DIR / "app.sqlite3"))
+DATA_DIR = Path(os.getenv("DATA_DIR") or ROOT_DIR / "data")
+DB_PATH = Path(os.getenv("DATABASE_URL") or DATA_DIR / "app.sqlite3")
 FIXTURE_PATH = ROOT_DIR / "fixtures" / "sample_comments_drawme.jsonl"
 
 app = FastAPI(title="YouTube Comment Mention Analyzer")
@@ -36,7 +36,7 @@ class InspectRequest(BaseModel):
 
 class RunCreateRequest(BaseModel):
     url: str
-    max_comments: int = Field(default=1000, ge=1, le=1000)
+    max_comments: int = Field(default=5000, ge=1, le=5000)
     reply_fetch_mode: Literal["none", "inline_subset", "full"] = "none"
     fetch_order: Literal["relevance", "time"] = "relevance"
     use_llm: bool = False
