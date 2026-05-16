@@ -112,7 +112,7 @@ select {
   align-items: center;
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) 180px;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) 180px;
 }
 
 .status-panel__wide {
@@ -396,7 +396,7 @@ h4 {
 .report-summary-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0 0 16px;
 }
 
@@ -612,6 +612,16 @@ blockquote {
   justify-content: space-between;
 }
 
+.reply-badge {
+  background: #e8f1ff;
+  border: 1px solid #bfd6ff;
+  border-radius: 999px;
+  color: #154c9f;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
 .mention-pills {
   display: flex;
   flex-wrap: wrap;
@@ -661,6 +671,7 @@ blockquote {
 @media (max-width: 760px) {
   .hero,
   .status-panel,
+  .report-summary-grid,
   .report-layout,
   .detail-layout,
   .comment-toolbar,

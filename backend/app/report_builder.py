@@ -129,6 +129,8 @@ def build_report_payload(
                 "comment_id": comment["id"],
                 "text_original": comment["text_original"],
                 "like_count": comment["like_count"],
+                "is_reply": bool(comment["is_reply"]),
+                "parent_comment_id": comment["parent_comment_id"],
                 "mentioned_persons": [
                     {"person_id": person_id, "display_name": display_name}
                     for person_id, display_name in sorted(mentions_by_comment[comment["id"]].items(), key=lambda item: item[1])

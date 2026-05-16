@@ -11,6 +11,8 @@ type RunState = {
     source: string;
     max_comments_requested: number;
     max_comments_fetched: number;
+    fetched_top_level_count: number;
+    fetched_reply_count: number;
     fetch_order: string;
     reply_fetch_mode: string;
     fetched_at: string;
@@ -122,6 +124,8 @@ type Report = {
     comment_id: string;
     text_original: string;
     like_count: number;
+    is_reply: boolean;
+    parent_comment_id?: string | null;
     mentioned_persons: Array<{
       person_id: string;
       display_name: string;
@@ -146,6 +150,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export default function App() {
   const [url, setUrl] = useState("https://www.youtube.com/watch?v=vlpLbiqNhLo");
   const [maxComments, setMaxComments] = useState(5000);
+  const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset">("none");
   const [run, setRun] = useState<RunState | null>(null);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
@@ -230,7 +235,7 @@ export default function App() {
         body: JSON.stringify({
           url,
           max_comments: maxComments,
-          reply_fetch_mode: "none",
+          reply_fetch_mode: replyFetchMode,
           fetch_order: "relevance",
           use_llm: false,
           use_embeddings: false
@@ -371,6 +376,13 @@ export default function App() {
               onChange={(event) => setMaxComments(Number(event.target.value))}
             />
           </label>
+          <label>
+            返信コメント
+            <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset")}>
+              <option value="none">トップレベルのみ</option>
+              <option value="inline_subset">API同梱分を含める</option>
+            </select>
+          </label>
           <button type="submit" disabled={busy}>
             {busy ? "処理中" : "分析を開始"}
           </button>
@@ -417,8 +429,15 @@ export default function App() {
                 {run.fetch_summary.max_comments_fetched} / {run.fetch_summary.max_comments_requested}
               </strong>
               <small>
-                {run.fetch_summary.fetch_order} / {run.fetch_summary.reply_fetch_mode}
+                {run.fetch_summary.fetch_order} / {replyFetchModeLabel(run.fetch_summary.reply_fetch_mode)}
               </small>
+            </div>
+          ) : null}
+          {run.fetch_summary ? (
+            <div>
+              <span className="label">Replies</span>
+              <strong>{run.fetch_summary.fetched_reply_count} 件</strong>
+              <small>{replyFetchModeLabel(run.fetch_summary.reply_fetch_mode)}</small>
             </div>
           ) : null}
           {run.fetch_summary ? (
@@ -622,7 +641,7 @@ export default function App() {
               <h2>言及ランキング</h2>
               <p>
                 データソース: {sourceLabel(report.fetch_summary.source)} / 取得コメント:
-                {report.fetch_summary.fetched_top_level_count} / YouTube表示:
+                {report.fetch_summary.fetched_top_level_count + report.fetch_summary.fetched_reply_count} / YouTube表示:
                 {formatNullableNumber(report.video.youtube_comment_count)}
               </p>
             </div>
@@ -644,6 +663,11 @@ export default function App() {
                 {report.fetch_summary.max_comments_fetched} / {report.fetch_summary.max_comments_requested}
               </strong>
               <small>YouTube表示 {formatNullableNumber(report.video.youtube_comment_count)}</small>
+            </div>
+            <div>
+              <span className="label">返信</span>
+              <strong>{report.fetch_summary.fetched_reply_count} 件</strong>
+              <small>{replyFetchModeLabel(report.fetch_summary.reply_fetch_mode)}</small>
             </div>
           </div>
           <div className="like-distribution" aria-label="いいね数分布">
@@ -800,6 +824,7 @@ export default function App() {
               <article className="comment-row" key={comment.comment_id}>
                 <div className="comment-row__meta">
                   <strong>{comment.like_count} likes</strong>
+                  {comment.is_reply ? <span className="reply-badge">返信</span> : null}
                   <div className="mention-pills">
                     {comment.mentioned_persons.length ? (
                       comment.mentioned_persons.map((person) => (
@@ -888,6 +913,13 @@ function sourceNote(source: string): string {
   if (source === "youtube_api") return "今回YouTube APIから取得。次回同条件はcache使用。";
   if (source === "fixture") return "API keyなしの検証データ。";
   return "";
+}
+
+function replyFetchModeLabel(mode: string): string {
+  if (mode === "none") return "トップレベルのみ";
+  if (mode === "inline_subset") return "API同梱返信を含む";
+  if (mode === "full") return "返信を全件取得";
+  return mode;
 }
 
 function formatNullableNumber(value?: number | null): string {

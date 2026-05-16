@@ -8,6 +8,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 
 - YouTube URL から `video_id` を抽出する
 - `YOUTUBE_API_KEY` があれば YouTube Data API v3 で最大 5000 件のコメントを取得する
+- 返信モードは `none` と `inline_subset` を選べる
 - API key がない場合は `fixtures/sample_comments_drawme.jsonl` で動く
 - 取得コメントを SQLite と JSONL artifact に保存する
 - live API の取得結果を `data/youtube_cache/` に保存し、同条件では再利用する
@@ -86,14 +87,15 @@ Vite は空きポートを自動割り当てします。表示された `Local:`
 1. バックエンドとフロントエンドを起動する。
 2. 画面の URL 欄に YouTube URL を入力する。
 3. 最大コメント数を確認する。デフォルトは `5000`。
-4. 「分析を開始」を押す。
-5. Data Source が `Cache` の場合は同条件の保存済みデータを使っており、YouTube API は再消費していない。
-6. YouTube 表示コメント数と取得コメント数の差分を確認する。古い cache や fixture では YouTube 表示コメント数が未取得になる。
-7. 人物候補と表記を確認し、必要に応じて採用・除外、表示名編集、表記追加、統合、集計からの除外を行う。
-8. 「候補を確定して集計」を押す。
-9. 言及ランキング、取得範囲、いいね数分布、人物別詳細、代表コメント、section status を確認する。
-10. コメント一覧で本文検索や人物フィルタを使い、根拠コメントを確認する。
-11. 必要に応じてコメント単位で人物紐づけを追加または解除する。
+4. 返信コメントを含めたい場合は `API同梱分を含める` を選ぶ。
+5. 「分析を開始」を押す。
+6. Data Source が `Cache` の場合は同条件の保存済みデータを使っており、YouTube API は再消費していない。
+7. YouTube 表示コメント数と取得コメント数の差分を確認する。古い cache や fixture では YouTube 表示コメント数が未取得になる。
+8. 人物候補と表記を確認し、必要に応じて採用・除外、表示名編集、表記追加、統合、集計からの除外を行う。
+9. 「候補を確定して集計」を押す。
+10. 言及ランキング、取得範囲、返信件数、いいね数分布、人物別詳細、代表コメント、section status を確認する。
+11. コメント一覧で本文検索や人物フィルタを使い、根拠コメントを確認する。
+12. 必要に応じてコメント単位で人物紐づけを追加または解除する。
 
 初期検証 URL:
 
@@ -124,6 +126,8 @@ data/youtube_cache/<video_id>/<fetch_order>_<reply_fetch_mode>_<max_comments>.me
 ```
 
 同じ動画 ID・取得順・返信モード・最大件数で再分析する場合は cache を読み、API を再度呼びません。テストは live API ではなく `fixtures/` の seed data を使います。最大コメント数の現在の上限は `5000` です。
+
+`reply_fetch_mode=inline_subset` は `commentThreads.list` のレスポンスに同梱される返信だけを保存します。全返信を保証するものではありませんが、追加の `comments.list` 呼び出しなしで返信欄の一部を分析対象にできます。`reply_fetch_mode=full` は後続フェーズです。
 
 cache metadata には、取得時点で YouTube API から得られた動画タイトル、チャンネル名、YouTube 表示コメント数、再生数、動画いいね数を保存します。過去に作成された古い cache ではこれらの一部が未取得になることがあります。
 

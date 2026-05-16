@@ -46,6 +46,66 @@ def optional_int(value: Any) -> int | None:
         return None
 
 
+def comment_from_snippet(
+    comment_id: str,
+    snippet: dict[str, Any],
+    source_order: int,
+    fetch_order: str,
+    parent_comment_id: str | None,
+    is_reply: bool,
+    reply_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "comment_id": comment_id,
+        "parent_comment_id": parent_comment_id,
+        "author_display_name": snippet.get("authorDisplayName"),
+        "author_channel_id": (snippet.get("authorChannelId") or {}).get("value"),
+        "text_original": snippet.get("textDisplay") or snippet.get("textOriginal") or "",
+        "like_count": snippet.get("likeCount") or 0,
+        "published_at": snippet.get("publishedAt"),
+        "updated_at": snippet.get("updatedAt"),
+        "is_reply": is_reply,
+        "reply_count": reply_count,
+        "source_order": source_order,
+        "api_relevance_order": source_order if fetch_order == "relevance" else None,
+    }
+
+
+def top_level_comment_from_thread(item: dict[str, Any], source_order: int, fetch_order: str) -> dict[str, Any]:
+    top_comment = item["snippet"]["topLevelComment"]
+    return comment_from_snippet(
+        comment_id=top_comment["id"],
+        snippet=top_comment["snippet"],
+        source_order=source_order,
+        fetch_order=fetch_order,
+        parent_comment_id=None,
+        is_reply=False,
+        reply_count=item["snippet"].get("totalReplyCount") or 0,
+    )
+
+
+def inline_reply_comments_from_thread(
+    item: dict[str, Any],
+    first_source_order: int,
+    fetch_order: str,
+) -> list[dict[str, Any]]:
+    parent_comment_id = item["snippet"]["topLevelComment"]["id"]
+    replies = item.get("replies", {}).get("comments", [])
+    output: list[dict[str, Any]] = []
+    for offset, reply in enumerate(replies):
+        output.append(
+            comment_from_snippet(
+                comment_id=reply["id"],
+                snippet=reply["snippet"],
+                source_order=first_source_order + offset,
+                fetch_order=fetch_order,
+                parent_comment_id=parent_comment_id,
+                is_reply=True,
+            )
+        )
+    return output
+
+
 @dataclass(frozen=True)
 class FetchConfig:
     max_comments: int = 1000
@@ -61,6 +121,8 @@ class YouTubeCommentClient:
 
     def fetch_video_bundle(self, url: str, config: FetchConfig) -> dict[str, Any]:
         video_id = parse_youtube_video_id(url)
+        if config.reply_fetch_mode == "full":
+            raise RuntimeError("reply_fetch_mode=full は未実装です。inline_subset または none を指定してください。")
         cache_file = self._cache_file(video_id, config)
         if cache_file.exists():
             comments = self._read_jsonl(cache_file)
@@ -99,7 +161,7 @@ class YouTubeCommentClient:
         while len(comments) < config.max_comments:
             query = {
                 "key": api_key,
-                "part": "snippet",
+                "part": "snippet,replies" if config.reply_fetch_mode == "inline_subset" else "snippet",
                 "videoId": video_id,
                 "maxResults": min(100, config.max_comments - len(comments)),
                 "textFormat": "plainText",
@@ -109,22 +171,17 @@ class YouTubeCommentClient:
                 query["pageToken"] = page_token
             payload = self._get_json("https://www.googleapis.com/youtube/v3/commentThreads", query)
             for item in payload.get("items", []):
-                snippet = item["snippet"]["topLevelComment"]["snippet"]
-                comments.append({
-                    "comment_id": item["snippet"]["topLevelComment"]["id"],
-                    "parent_comment_id": None,
-                    "author_display_name": snippet.get("authorDisplayName"),
-                    "author_channel_id": (snippet.get("authorChannelId") or {}).get("value"),
-                    "text_original": snippet.get("textDisplay") or snippet.get("textOriginal") or "",
-                    "like_count": snippet.get("likeCount") or 0,
-                    "published_at": snippet.get("publishedAt"),
-                    "updated_at": snippet.get("updatedAt"),
-                    "is_reply": False,
-                    "reply_count": item["snippet"].get("totalReplyCount") or 0,
-                    "source_order": source_order,
-                    "api_relevance_order": source_order if config.fetch_order == "relevance" else None,
-                })
+                top_level = top_level_comment_from_thread(item, source_order, config.fetch_order)
+                comments.append(top_level)
                 source_order += 1
+                if config.reply_fetch_mode == "inline_subset":
+                    for reply in inline_reply_comments_from_thread(item, source_order, config.fetch_order):
+                        if len(comments) >= config.max_comments:
+                            break
+                        comments.append(reply)
+                        source_order += 1
+                if len(comments) >= config.max_comments:
+                    break
             page_token = payload.get("nextPageToken")
             if not page_token:
                 break

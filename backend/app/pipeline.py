@@ -682,6 +682,8 @@ class AnalysisStore:
                 "source": snapshot["source"],
                 "max_comments_requested": snapshot["max_comments_requested"],
                 "max_comments_fetched": snapshot["max_comments_fetched"],
+                "fetched_top_level_count": snapshot["fetched_top_level_count"],
+                "fetched_reply_count": snapshot["fetched_reply_count"],
                 "fetch_order": snapshot["fetch_order"],
                 "reply_fetch_mode": snapshot["reply_fetch_mode"],
                 "fetched_at": snapshot["fetched_at"],

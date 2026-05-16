@@ -105,6 +105,79 @@ class PipelineTest(unittest.TestCase):
             self.assertNotIn(target_person["person_id"], {person["person_id"] for person in updated_comment["mentioned_persons"]})
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
 
+    def test_inline_subset_replies_are_saved_and_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            bundle = {
+                "video": {
+                    "youtube_video_id": "vlpLbiqNhLo",
+                    "url": "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    "title": "Fixture: みりちゃむ",
+                    "channel_title": "Fixture",
+                    "description": "",
+                    "published_at": None,
+                    "youtube_comment_count": None,
+                    "comment_count_available": False,
+                    "youtube_view_count": None,
+                    "youtube_like_count": None,
+                },
+                "comments": [
+                    {
+                        "comment_id": "top-1",
+                        "parent_comment_id": None,
+                        "author_display_name": "top",
+                        "author_channel_id": "top-channel",
+                        "text_original": "トップコメント",
+                        "like_count": 1,
+                        "published_at": None,
+                        "updated_at": None,
+                        "is_reply": False,
+                        "reply_count": 1,
+                        "source_order": 0,
+                        "api_relevance_order": 0,
+                    },
+                    {
+                        "comment_id": "reply-1",
+                        "parent_comment_id": "top-1",
+                        "author_display_name": "reply",
+                        "author_channel_id": "reply-channel",
+                        "text_original": "返信でみりちゃむに言及",
+                        "like_count": 2,
+                        "published_at": None,
+                        "updated_at": None,
+                        "is_reply": True,
+                        "reply_count": 0,
+                        "source_order": 1,
+                        "api_relevance_order": 1,
+                    },
+                ],
+                "fetch_summary": {
+                    "source": "fixture",
+                    "fetched_at": "2026-01-01T00:00:00+00:00",
+                    "fetched_top_level_count": 1,
+                    "fetched_reply_count": 1,
+                    "total_reply_count_from_threads": 1,
+                    "total_like_count": 3,
+                },
+            }
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 2,
+                    "reply_fetch_mode": "inline_subset",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            report = store.classify_and_report(run_id)
+            self.assertEqual(report["fetch_summary"]["fetched_top_level_count"], 1)
+            self.assertEqual(report["fetch_summary"]["fetched_reply_count"], 1)
+            reply_comment = next(comment for comment in report["comments"] if comment["is_reply"])
+            self.assertEqual(reply_comment["parent_comment_id"], "top-1")
+            self.assertTrue(reply_comment["mentioned_persons"])
+
 
 if __name__ == "__main__":
     unittest.main()

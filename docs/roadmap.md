@@ -151,13 +151,16 @@ URL 入力
 - `commentThreads.list`
 - max comments `5000`
 - `reply_fetch_mode=none`
+- `reply_fetch_mode=inline_subset`
+- `commentThreads.list` に同梱される返信コメントの保存
+- 返信コメントを候補抽出・分類・レポート対象に含める
+- 返信コメントの UI 表示
 - cache
 - 取得エラーの UI 表示
 - 取得済みコメント一覧表示
 
 後続フェーズへ移動:
 
-- `reply_fetch_mode=inline_subset`
 - `reply_fetch_mode=full`
 - `comments.list` による返信 full 取得
 - 差分更新
@@ -201,7 +204,6 @@ MVP-0 の必須 vertical slice は完了済み。次に残す場合は、分析�
 
 YouTube API quota 消費が増えるため、cache と取得概要 UI が安定してから扱う。
 
-- `reply_fetch_mode=inline_subset` （次に対応）
 - `reply_fetch_mode=full`
 - `comments.list` による返信 full 取得
 - 差分更新
@@ -266,11 +268,10 @@ YouTube API quota 消費が増えるため、cache と取得概要 UI が安定�
 優先順位は次の順です。
 
 1. LLM なしの MVP-0 を初期検証動画で人間確認し、alias 誤爆を修正する。
-2. 返信取得が必要な動画でだけ `reply_fetch_mode=inline_subset` を追加する。
-3. MVP-1 の未知 alias / ニックネーム候補サジェストへ進む。
-4. MVP-1 の LLM 候補整理、曖昧コメント分類、人物別要約へ進む。
-5. Phase 7 の過去分析一覧、概要ダッシュボード、グラフへ進む。
-6. Phase 6 の full 返信取得と差分更新へ進む。
+2. MVP-1 の未知 alias / ニックネーム候補サジェストへ進む。
+3. MVP-1 の LLM 候補整理、曖昧コメント分類、人物別要約へ進む。
+4. Phase 7 の過去分析一覧、概要ダッシュボード、グラフへ進む。
+5. Phase 6 の full 返信取得と差分更新へ進む。
 
 ## 完了判定
 
