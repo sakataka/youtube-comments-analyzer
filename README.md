@@ -33,7 +33,8 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - 表記ごとの代表コメントを候補確認画面で確認する
 - 採用済み alias でコメントを分類する
 - 人物別言及ランキング、いいね加重スコア、代表コメントを表示する
-- 人物別詳細で集計表記、特徴語、代表コメントを確認する
+- 人物別詳細で集計表記、ノイズ除外済みの特徴語、代表コメントを確認する
+- SudachiPy による日本語形態素解析を使い、`ですよ` などの語尾・機能語・一般語を共通フィルタで除外する
 - 分析結果を候補確認、概要、LLM補助、未知 alias、人物詳細、コメント一覧のタブで切り替える
 - コメント一覧で本文検索、人物フィルタ、未紐づけ確認を行う
 - コメント一覧から人物紐づけの追加・解除を行い、ランキングに反映する
@@ -44,6 +45,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - macOS
 - Python 3.14+
 - Bun 1.3+
+- SudachiPy + SudachiDict-core
 
 ## セットアップ
 
@@ -176,7 +178,7 @@ LLM 補助だけが失敗した場合も、候補抽出・alias・ランキン�
 
 - `候補確認`: 人物候補ごとに、集計先の人物名と配下 alias を編集します。
 - `頻出語レビュー`: 未登録の頻出表記を `alias 候補` / `要確認` / `一般語` に分類し、人物 alias へ追加できます。
-- `人物詳細`: 人物ごとの魅力カテゴリ、tone、要約、根拠コメント、特徴語を確認できます。
+- `人物詳細`: 人物ごとの魅力カテゴリ、tone、要約、根拠コメント、TF-IDF 的に重み付けした特徴語を確認できます。
 - `関係性`: 同じコメント内で同時に言及された人物ペアの件数、weighted score、代表コメント、簡易カテゴリ、ヒートマップを確認できます。
 - `クラスタ`: 5〜12 件の指定クラスタ数を目安に、特徴語ベースでコメント群、代表コメント、主な人物、頻出語を確認できます。
 - `コメント`: コメント単位で人物の追加・削除を行い、代表コメントだけでは拾えない言及を補正できます。
@@ -211,6 +213,7 @@ backend/
     mention_classification.py  alias matching and mention confidence
     report_builder.py          report JSON assembly and fetch coverage summaries
     text.py                    text normalization
+    text_filters.py            Japanese morphological analysis and shared keyword filtering
   tests/
 fixtures/
 src/

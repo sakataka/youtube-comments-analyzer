@@ -8,6 +8,8 @@ from backend.app.candidate_extraction import extract_candidate_tokens
 from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
+from backend.app.report_builder import person_feature_words
+from backend.app.text_filters import is_noise_keyword, keyword_tokens
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
 
@@ -31,6 +33,36 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("みりちゃむ", tokens)
         self.assertIn("立野沙紀", tokens)
         self.assertNotIn("DRAW", tokens)
+
+    def test_noise_keyword_filter(self):
+        for term in ["ですよ", "でした", "ってる", "してる", "すぎる"]:
+            self.assertTrue(is_noise_keyword(term), term)
+        for term in ["みりちゃむ", "ミッタン", "キングボンビー", "スマブラ"]:
+            self.assertFalse(is_noise_keyword(term), term)
+
+    def test_keyword_tokens_use_morphology_to_skip_function_words(self):
+        tokens = keyword_tokens("みりちゃむの返し最高ですよでしたしてる")
+        self.assertIn("返し", tokens)
+        self.assertIn("最高", tokens)
+        self.assertNotIn("です", tokens)
+        self.assertNotIn("よ", tokens)
+        self.assertNotIn("でし", tokens)
+        self.assertNotIn("た", tokens)
+        self.assertNotIn("てる", tokens)
+
+    def test_person_feature_words_exclude_noise_terms(self):
+        words = person_feature_words(
+            [
+                {"text_original": "ミッタン ですよ でした してる 返し 良い"},
+                {"text_original": "ミッタンの返し最高"},
+            ],
+            ["ミッタン"],
+        )
+        terms = {word["term"] for word in words}
+        self.assertIn("返し", terms)
+        self.assertNotIn("ですよ", terms)
+        self.assertNotIn("でした", terms)
+        self.assertNotIn("してる", terms)
 
     def test_alias_match(self):
         self.assertTrue(alias_matches("福留さんの空気がいい", "福留"))
@@ -92,6 +124,7 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("category_counts", report["appeal_summary"]["people"][0])
             self.assertIn("tone_counts", report["appeal_summary"]["people"][0])
             self.assertIn("evidence_comments", report["appeal_summary"]["people"][0])
+            self.assertIn("feature_words", report["appeal_summary"]["people"][0])
             self.assertEqual(report["sections"]["cooccurrence"]["status"], "available")
             self.assertIn("pairs", report["cooccurrence"])
             self.assertIn("matrix", report["cooccurrence"])
@@ -239,20 +272,34 @@ class PipelineTest(unittest.TestCase):
                         "source_order": 1,
                         "api_relevance_order": 1,
                     },
+                    {
+                        "comment_id": "comment-3",
+                        "parent_comment_id": None,
+                        "author_display_name": "c",
+                        "author_channel_id": "c",
+                        "text_original": "ですよでしたしてる",
+                        "like_count": 1,
+                        "published_at": None,
+                        "updated_at": None,
+                        "is_reply": False,
+                        "reply_count": 0,
+                        "source_order": 2,
+                        "api_relevance_order": 2,
+                    },
                 ],
                 "fetch_summary": {
                     "source": "fixture",
                     "fetched_at": "2026-01-01T00:00:00+00:00",
-                    "fetched_top_level_count": 2,
+                    "fetched_top_level_count": 3,
                     "fetched_reply_count": 0,
                     "total_reply_count_from_threads": 0,
-                    "total_like_count": 5,
+                    "total_like_count": 6,
                 },
             }
             run_id = store.create_run(
                 bundle,
                 {
-                    "max_comments": 2,
+                    "max_comments": 3,
                     "reply_fetch_mode": "none",
                     "fetch_order": "relevance",
                     "use_llm": False,
@@ -263,8 +310,19 @@ class PipelineTest(unittest.TestCase):
             suggestions = {suggestion["token"]: suggestion for suggestion in report["alias_suggestions"]}
 
             self.assertIn("ミッタン", suggestions)
+            self.assertNotIn("ですよ", suggestions)
+            self.assertNotIn("でした", suggestions)
+            self.assertNotIn("してる", suggestions)
             self.assertEqual(suggestions["ミッタン"]["hit_count"], 2)
             self.assertEqual(suggestions["ミッタン"]["suggested_person_name"], "みりちゃむ")
+            cluster_terms = {
+                keyword["term"]
+                for cluster in report["clusters"]["clusters"]
+                for keyword in cluster["top_keywords"]
+            }
+            self.assertNotIn("ですよ", cluster_terms)
+            self.assertNotIn("でした", cluster_terms)
+            self.assertNotIn("してる", cluster_terms)
 
     def test_llm_assist_prompt_and_cache_flow(self):
         class FakeLlmClient:

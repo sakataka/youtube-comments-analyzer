@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .text import normalize_alias
+from .text_filters import is_noise_keyword
 
 
 HONORIFIC_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
@@ -215,7 +216,7 @@ def extract_candidate_tokens(
     seen: set[str] = set()
     for token in tokens:
         cleaned_token = clean_candidate_token(token)
-        if not cleaned_token or cleaned_token in seen:
+        if not cleaned_token or cleaned_token in seen or is_noise_keyword(cleaned_token):
             continue
         cleaned.append(cleaned_token)
         seen.add(cleaned_token)
@@ -249,6 +250,8 @@ def clean_candidate_token(token: str) -> str:
 
 
 def is_generic_candidate(token: str) -> bool:
+    if is_noise_keyword(token):
+        return True
     normalized_stopwords = {normalize_alias(word) for word in GENERIC_TOKEN_STOPWORDS}
     if token in GENERIC_TOKEN_STOPWORDS or normalize_alias(token) in normalized_stopwords:
         return True

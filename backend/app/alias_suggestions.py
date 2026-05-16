@@ -7,46 +7,13 @@ from typing import Any
 from .candidate_extraction import is_generic_candidate
 from .mention_classification import alias_matches
 from .text import normalize_alias
+from .text_filters import is_noise_keyword
 
 
 NICKNAME_TOKEN_RE = re.compile(r"[ァ-ヶー]{3,12}|[ぁ-んー]{3,12}|[一-龥々]{2,6}(?:ちゃん|さん|くん|君)")
 SUGGESTION_STOPWORDS = {
-    "ありがとう",
-    "ありがとうございます",
-    "おもしろい",
-    "かわいい",
-    "すごい",
-    "めちゃくちゃ",
-    "ちゃんと",
-    "なんか",
-    "みたい",
-    "ほんと",
-    "やっぱり",
     "それぞれ",
     "みんな",
-    "今回",
-    "動画",
-    "コメント",
-    "すぎる",
-    "すぎて",
-    "めっちゃ",
-    "ってる",
-    "してる",
-    "だった",
-    "ったら",
-    "なの",
-    "として",
-    "からの",
-    "でした",
-    "がいい",
-    "みたいな",
-    "らしい",
-    "デビュー",
-    "グループ",
-    "ゲーム",
-    "コロナ",
-    "ティッシュ",
-    "ドローミー",
 }
 
 
@@ -146,15 +113,13 @@ def should_suggest_alias_token(normalized_token: str, token: str, known_aliases:
         return False
     if len(normalized_token) < 2 or len(normalized_token) > 12:
         return False
-    if normalized_token in {normalize_alias(word) for word in SUGGESTION_STOPWORDS}:
+    if is_noise_keyword(token) or normalized_token in {normalize_alias(word) for word in SUGGESTION_STOPWORDS}:
         return False
     if is_generic_candidate(token):
         return False
     if re.search(r"\d", normalized_token):
         return False
     if re.fullmatch(r"[ぁ-んー]+", normalized_token) and len(normalized_token) <= 2:
-        return False
-    if re.fullmatch(r"[ぁ-んー]+", normalized_token) and len(normalized_token) >= 5:
         return False
     return True
 

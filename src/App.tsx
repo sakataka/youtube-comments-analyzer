@@ -174,6 +174,12 @@ type AppealPersonSummary = {
   tone_counts: Record<"positive" | "neutral" | "mixed" | "negative" | "unclear", number>;
   dominant_tone: string;
   summary: string;
+  feature_words: Array<{
+    term: string;
+    count: number;
+    document_count: number;
+    score: number;
+  }>;
   evidence_comments: Array<{
     comment_id: string;
     text_original: string;
@@ -383,10 +389,7 @@ export default function App() {
       appeal,
       comments,
       aliases,
-      featureWords: extractFeatureWords(
-        comments.map((comment) => comment.text_original),
-        [selectedDetailPerson.display_name, ...aliases.map((alias) => alias.alias_text)]
-      )
+      featureWords: appeal?.feature_words ?? []
     };
   }, [report, selectedDetailPerson]);
 
@@ -2001,22 +2004,4 @@ function defaultAliasReviewState(suggestion: AliasSuggestion): AliasReviewState 
   if (/^[ぁ-んー]+$/.test(normalized) && normalized.length >= 5) return "common_word";
   if (/^[ぁ-んー]+$/.test(normalized)) return "needs_review";
   return suggestion.suggested_person_id ? "alias_candidate" : "needs_review";
-}
-
-function extractFeatureWords(texts: string[], excludedTerms: string[]): Array<{ term: string; count: number }> {
-  const excluded = new Set(excludedTerms.map((term) => normalizeSearch(term)).filter(Boolean));
-  const stopwords = new Set(["さん", "ちゃん", "くん", "これ", "それ", "動画", "コメント", "ところ", "感じ", "今回"]);
-  const counts = new Map<string, number>();
-  for (const text of texts) {
-    const tokens = text.match(/[一-龥々ぁ-んァ-ヶーA-Za-z0-9]{2,16}/g) ?? [];
-    for (const token of tokens) {
-      const normalized = normalizeSearch(token);
-      if (excluded.has(normalized) || stopwords.has(normalized) || normalized.length < 2 || /\d/.test(normalized)) continue;
-      counts.set(token, (counts.get(token) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([term, count]) => ({ term, count }));
 }

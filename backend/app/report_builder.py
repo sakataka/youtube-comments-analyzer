@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import math
-import re
 from collections import defaultdict
 from itertools import combinations
 from typing import Any
+
+from .text import normalize_alias
+from .text_filters import is_noise_keyword, keyword_tokens
 
 
 APPEAL_CATEGORIES = [
@@ -31,22 +33,6 @@ CLUSTER_DEFINITIONS = [
     ("scene", "場面・引用", [":", "：", "Fire", "だぁ", "泣", "ゲーム", "スマブラ"]),
     ("concern", "注意・違和感", ["嫌", "苦手", "怖い", "無理", "つまら", "ひどい"]),
 ]
-
-CLUSTER_STOPWORDS = {
-    "これ",
-    "それ",
-    "動画",
-    "コメント",
-    "ちゃん",
-    "さん",
-    "みたい",
-    "すぎる",
-    "めっちゃ",
-    "今回",
-    "ところ",
-    "感じ",
-}
-
 
 def like_count_distribution(comments: list[Any]) -> list[dict[str, int | str]]:
     buckets = [
@@ -164,6 +150,7 @@ def build_appeal_summary(mentions: list[Any]) -> dict[str, Any]:
             "tone_counts": tone_counts,
             "dominant_tone": dominant_tone(tone_counts),
             "summary": appeal_summary_text(person["display_name"], dominant_categories, tone_counts),
+            "feature_words": person_feature_words(comments, [person["display_name"]]),
             "evidence_comments": evidence_comments,
             "negative_note": negative_note_text(negative_count, len(comments)),
         })
@@ -227,6 +214,39 @@ def negative_note_text(negative_count: int, total_count: int) -> str | None:
     if rate < 0.08:
         return None
     return f"negative 判定が {negative_count} 件あります。過度に強調せず、代表コメントで文脈確認してください。"
+
+
+def person_feature_words(comments: list[dict[str, Any]], excluded_terms: list[str]) -> list[dict[str, Any]]:
+    counts: defaultdict[str, int] = defaultdict(int)
+    document_counts: defaultdict[str, int] = defaultdict(int)
+    excluded = {normalize_alias(term) for term in excluded_terms}
+    for comment in comments:
+        seen_in_comment: set[str] = set()
+        for token in extract_keyword_tokens(comment["text_original"]):
+            normalized = normalize_alias(token)
+            if normalized in excluded:
+                continue
+            counts[token] += 1
+            if normalized not in seen_in_comment:
+                document_counts[token] += 1
+                seen_in_comment.add(normalized)
+    total_docs = max(len(comments), 1)
+    rows = []
+    for term, count in counts.items():
+        doc_count = document_counts[term]
+        score = count * (1 + math.log(total_docs / max(doc_count, 1)))
+        rows.append({
+            "term": term,
+            "count": count,
+            "document_count": doc_count,
+            "score": round(score, 4),
+        })
+    rows.sort(key=lambda row: (row["score"], row["count"]), reverse=True)
+    return rows[:12]
+
+
+def extract_keyword_tokens(text: str) -> list[str]:
+    return keyword_tokens(text)
 
 
 def build_cooccurrence(mentions: list[Any]) -> dict[str, Any]:
@@ -409,14 +429,10 @@ def top_cluster_persons(comments: list[Any], mentions_by_comment: dict[str, dict
 def top_cluster_keywords(comments: list[Any], seed_keywords: list[str]) -> list[dict[str, Any]]:
     counts: defaultdict[str, int] = defaultdict(int)
     for keyword in seed_keywords:
-        if keyword:
+        if keyword and not is_noise_keyword(keyword):
             counts[keyword] += 1
     for comment in comments:
-        for token in re.findall(r"[一-龥々ぁ-んァ-ヶーA-Za-z]{2,16}", comment["text_original"]):
-            if token in CLUSTER_STOPWORDS:
-                continue
-            if re.fullmatch(r"[ぁ-んー]+", token) and len(token) >= 5:
-                continue
+        for token in extract_keyword_tokens(comment["text_original"]):
             counts[token] += 1
     return [
         {"term": term, "count": count}
