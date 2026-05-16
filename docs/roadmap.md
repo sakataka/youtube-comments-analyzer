@@ -1,351 +1,133 @@
 # 実装ロードマップ
 
-この文書は [requirements.md](requirements.md) を基準に、現在の実装状況を「完了」「一部完了」「未実装」に分けたものです。
+この文書は [requirements.md](requirements.md) を基準に、まだ実装・検証・改善が残っている項目だけを残した backlog です。
 
-## 現在の到達点
+完了済みの実装詳細はここには載せません。現状の使い方と実装済み機能は [../README.md](../README.md) を参照してください。
 
-現在は MVP-1 の一部まで動く状態です。
+## 現在の前提
 
-```text
-URL 入力
-  -> video_id 抽出
-  -> fixture または YouTube API でコメント取得
-  -> コメント保存
-  -> 簡易人物候補抽出
-  -> 候補確認 UI
-  -> accepted alias で分類
-  -> 人物別ランキング表示
-  -> 必要に応じて Codex app server 経由の LLM 補助分析
-```
-
-## 完了
-
-### Phase 1: 基盤
-
-- repo 初期化
-- Bun + Vite + React + TypeScript の frontend 構成
-- Python 3.14 + FastAPI の backend 構成
-- FastAPI の `/api/health`
-- SQLite 初期 schema
-- YouTube URL parsing
-- dummy comments fixture
-- backend unit / integration test
-- frontend build
-
-### Phase 2: コメント取得の一部
-
-- YouTube Data API v3 連携
-- `commentThreads.list` によるトップレベルコメント取得
-- 最大コメント数 `5000`
-- `reply_fetch_mode=none`
-- `fetch_order=relevance | time`
-- live API 取得結果の cache 保存
-- 同条件 cache の再利用
-- `comment_snapshots` 保存
-- raw comments artifact 保存
-
-未完了部分は後述します。
-
-### Phase 3: 候補抽出の一部
-
-- コメント正規化
-- ルールベースの簡易候補抽出
-- 敬称つき表現、カタカナ表現、ハッシュタグ、漢字 + カタカナ表現の抽出
-- alias 候補保存
-- 候補確認 UI
-- action-based candidate API
-- 候補・alias の採用/除外
-- display name 編集 UI
-- alias 追加 UI
-- タイトル・概要欄・ハッシュタグの列挙からの候補抽出
-- タイトル上のフルネーム候補への短い表記の自動紐づけ
-- 一般語・番組/企画名寄り候補の自動除外
-- 自動紐づけの候補理由表示
-- 表記ごとの集計除外操作
-- 表記ごとの代表コメント本文表示
-- 候補 merge 操作
-
-### Phase 4: 分類・集計の一部
-
-- accepted alias による辞書マッチ分類
-- 同一コメント内の同一人物重複を 1 件扱い
-- 人物別言及ランキング
-- like weighted score `1 + log1p(like_count)`
-- 人物別代表コメント
-- `report.v1` JSON 生成
-- LLM / embedding dependent section の `skipped` 表示
-- run artifact として `mentions.jsonl` / `report.json` 保存
-
-### README / setup
-
-- 必要環境
-- backend setup
-- frontend setup
-- `.env.example`
-- 起動方法
-- 最小動作確認
-- cache 保存方針
-- デモ手順
-
-### Step 1: MVP-1 前の軽量リファクタリング
-
-- `pipeline.py` から候補抽出ロジックを `candidate_extraction.py` に分離
-- alias マッチと confidence を `mention_classification.py` に分離
-- report JSON 組み立てと取得範囲 summary を `report_builder.py` に分離
-- `pipeline.py` は SQLite schema、run orchestration、永続化 API を中心に整理
-- 既存テストの対象 import を新しい責務境界に合わせて更新
-
-### Step 2: Phase 6 inline subset
-
-- `reply_fetch_mode=inline_subset` を追加
-- `commentThreads.list` に同梱される返信コメントを保存
-- 返信コメントを候補抽出・分類・レポート対象に含める
-- 返信件数と返信 badge を UI に表示
-
-### Step 3: MVP-1 未知 alias / ニックネーム候補
-
-- コメント内のニックネームらしい語を未知 alias 候補として抽出
-- 既存人物の accepted alias と同一コメント内で共起する候補に紐づけ先を提案
-- UI から既存人物へ alias として追加し、再集計できる
-
-### Step 4: MVP-1 LLM 候補整理・曖昧分類
-
-- Codex app server 経由の LLM 補助分析 endpoint
-- 候補整理、alias 補完案、曖昧コメント分類の JSON schema
-- prompt version と入力 hash による LLM cache
-- `llm_assists` table と `data/runs/<run_id>/llm_assist.json` artifact 保存
-- LLM 補助分析 UI
-- author 情報を LLM 入力に含めない prompt / input builder
-
-### Step 5: Phase 7 過去分析一覧
-
-- `GET /api/runs` の run summary に作成日時を追加
-- 保存済み run の一覧 UI
-- 過去 run を開いて候補・既存 report を復元する UI
-- 取得 source、取得件数、返信モードを一覧で確認する表示
-
-### Step 6: Phase 7 概要ダッシュボード・グラフ
-
-- 概要ダッシュボード UI
-- 採用人物数、紐づけ済みコメント数、未紐づけコメント数、トップ人物の summary
-- 人物別言及数の横棒グラフ
-- コメント分類比率の簡易グラフ
-- 既存のいいね数分布グラフとランキングを同じ report 面に配置
-
-### Step 7: Phase 6 full 返信取得・差分更新
-
-- `reply_fetch_mode=full`
-- `comments.list` による返信 full 取得
-- full 返信を候補抽出・分類・レポート対象に含める
-- 差分更新 option
-- live API 再取得結果と既存 cache の `comment_id` 重複排除 merge
-- 差分更新時の Data Source 表示
-
-## 状況詳細
-
-### 動画・取得概要
-
-完了:
-
-- video URL
-- video ID
-- fetched_at
-- fetched comment count
-- top-level / reply count
-- total like count
-- fetch order
-- reply fetch mode
-- source fixture / cache / youtube_api
-- cache / YouTube API / fixture の UI 表示
-- cache 使用時の API 再消費なし表示
-- 取得不足の UI 表示
-- 取得エラーの API response 整理
-- live metadata の UI 表示強化
-- YouTube 上の comment count availability
-- いいね数分布
-- API で全件取得できない場合の詳細表示強化
-
-未完了:
-
-- なし
-
-### 人物候補と alias
-
-完了:
-
-- display name
-- entity_type
-- alias list
-- alias hit count
-- representative comment IDs
-- confidence
-- status
-- reason
-- 採用/除外操作
-- コメント単位で「このコメントはこの人物に紐づける」を修正するレビュー UI
-- alias ごとの代表コメント本文表示
-- 表記ゆれ統合 UI
-- merge 操作
-
-後続改善:
-
-- `person`, `group`, `duo` 以外の折りたたみ表示
-
-### コメント取得
-
-完了:
-
-- `commentThreads.list`
-- max comments `5000`
-- `reply_fetch_mode=none`
-- `reply_fetch_mode=inline_subset`
-- `reply_fetch_mode=full`
-- `commentThreads.list` に同梱される返信コメントの保存
-- `comments.list` による返信 full 取得
-- 返信コメントを候補抽出・分類・レポート対象に含める
-- 返信コメントの UI 表示
-- cache
-- 差分更新
-- 取得エラーの UI 表示
-- 取得済みコメント一覧表示
-
-未完了:
-
-- なし
-
-### レポート UI
-
-完了:
-
-- 候補確認
-- 言及ランキング
-- 代表コメント
-- section status
-- 人物別詳細画面
-- 人物別の集計表記表示
-- 人物別の特徴語表示
-- コメント一覧・検索画面
-- 人物フィルタ
-- 未紐づけコメント表示
-- コメント単位の人物紐づけ追加・解除
-- 手動紐づけ修正後のランキング再生成
-- 未知 alias / ニックネーム候補サジェスト
-- 未知 alias 候補を既存人物へ追加して再集計する UI
-- LLM 補助分析
-- LLM による候補整理の提案表示
-- LLM による alias 補完案の表示
-- LLM による曖昧コメント分類の表示
-- 過去分析一覧画面
-- 過去分析からの候補・レポート再表示
-- 概要ダッシュボード
-- グラフ表示
-
-後続フェーズへ移動:
-
-- 設定画面
-
-## 未実装
-
-### Phase 5: MVP-0 追加改善
-
-MVP-0 の必須 vertical slice は完了済み。次に残す場合は、分析精度や運用性を上げる追加改善として扱う。
-
-- `person`, `group`, `duo` 以外の entity type を折りたたむ表示
-- LLM なしの初期検証動画での alias 誤爆確認
-- confidence 表示の整理
-- 上位コメントの人間確認 workflow
-
-### Phase 6: 返信・再取得
-
-YouTube API quota 消費が増えるため、cache と取得概要 UI が安定してから扱う。
-
-- `reply_fetch_mode=full`
-- `comments.list` による返信 full 取得
-- 差分更新
-
-### Phase 7: レポート UI 拡張
-
-分析結果を見やすくする拡張であり、MVP-0 の分類・集計成立条件ではない。
-
-- 概要ダッシュボード
-- 過去分析一覧画面
-- 設定画面
-- グラフ表示
-
-### MVP-1: LLM あり分析
-
-完了:
-
-- コメント内のニックネームらしい語のサジェスト
-- 説明欄・タイトルにない表記の人物紐づけ候補提示
-- 既存人物に対する未知 alias のデルタ分析
-- LLM による候補整理
-- LLM による alias 候補補完
-- 曖昧コメント分類
-- LLM cache
-- prompt version / schema version / input hash による再利用
-
-未実装:
-
-- 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI
-- 魅力カテゴリ分類
-- 人物別要約
-- low confidence comments 表示
-- LLM 失敗時の部分 degraded report
+- MVP-0 の基本フローは動作済み。
+- 今回設定した Step 1 から Step 7 は完了済み。
+- MVP-2 の高度分析は一旦保留。
+- Codex app server 連携は実装済みだが、実 LLM 応答の受信成功は未確認。
 
 ## 次に進める順番
 
-1. MVP-1: 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI
-2. MVP-1: LLM 失敗時の部分 degraded report
-3. MVP-1: 魅力カテゴリ分類・人物別要約
+1. Codex app server 実受信の成功確認と修正
+2. 頻出語レビュー UI
+3. LLM 失敗時の degraded report
+4. 人物別魅力分析
+5. 共起・関係性分析
+6. コメントクラスタリング
+7. 運用・設定・データ管理の整理
 
-MVP-2 の高度分析は一旦保留です。
+## P0: 直近で確認・修正したいもの
 
-### MVP-2: 高度分析
+### Codex app server 実受信
 
-- embedding
-- コメントクラスタリング
-- 日本語形態素解析
-- 固有表現抽出
-- 助詞・係り受けを使った alias 文脈判定
-- クラスタ名生成
-- 共起ネットワーク
-- 関係性分析
-- 低信頼レビュー画面
+- `codex app-server` から実 LLM 応答を最後まで受信できる状態にする。
+- `turn/completed` まで到達しない原因を、参考実装 `/Users/sakataka/Documents/youtube-transcript-exporter` と比較して切り分ける。
+- 実応答 JSON の parse 成功を確認する。
+- 失敗時に UI へ分かりやすい原因を出す。
 
-### 分析品質
+### 頻出語レビュー UI
 
-- 日本語形態素解析
-- 固有表現抽出モデル
-- alias 誤爆抑制の高度化
-- グループ、番組名、企画名、ファン名の扱い強化
-- 上位 50 コメントの人間確認 workflow
-- confidence の UI 表示整理
+- 頻出語を `人物候補` / `alias 候補` / `一般語` / `要確認` に分類して表示する。
+- 未知 alias 候補と統合し、ユーザーが採用・除外・保留を判断できるようにする。
+- 一般語や企画名がランキングに混ざる場合の除外導線を整理する。
 
-### セキュリティ / プライバシー
+### degraded report
 
-- LLM 送信前の author 情報除外処理
-- 生データ export の明示操作
-- API key 表示抑止の UI
-- live test と通常 test の分離強化
+- LLM 補助分析が失敗しても、通常の候補抽出・分類・ランキングは completed のまま維持する。
+- report の section status に `failed` と失敗理由を残す。
+- UI で「LLM だけ失敗」「全体分析は有効」を明確に分けて表示する。
 
-## 次にやるなら
+## MVP-1: 分析品質
 
-優先順位は次の順です。
+### 人物候補と alias
 
-1. 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI。
-2. LLM 失敗時の部分 degraded report。
-3. 魅力カテゴリ分類・人物別要約。
-4. low confidence comments 表示。
+- `person`, `group`, `duo` 以外の entity type を折りたたみ・フィルタ表示する。
+- alias 削除を UI から行えるようにする。
+- 誤って統合された候補を分割できるようにする。
+- LLM なしの初期検証動画で alias 誤爆を確認し、抑制ルールを追加する。
+- confidence 表示を「候補信頼度」「alias 信頼度」「分類信頼度」など文脈別に整理する。
 
-## 完了判定
+### 低信頼・曖昧コメント
 
-MVP-0 は要求仕様書上の vertical slice と usable review flow を満たす状態です。Step 1 から Step 7 までの今回目標も完了済みです。追加改善として次はまだ余地があります。
+- low confidence comments を一覧表示する。
+- AI 判定と辞書判定が食い違ったコメントを表示する。
+- 人間確認を推奨する項目をまとめる。
+- LLM ambiguous classification の batch、retry、schema validation を実装する。
 
-- 主要人物候補の自動抽出精度
-- ユーザーが 1 分以内に候補確認を終えられる UI
-- entity_type ごとの折りたたみ
-- 頻出語レビュー UI
-- LLM 失敗時の degraded report
+### 言及ランキング
 
-そのため、現状は `Step 1-7 complete`、次の目標候補は `MVP-1 review quality improvements` とします。
+- 上位 N コメント内での言及数を表示する。
+- 複数人物同時言及数を表示する。
+- 単独言及数を表示する。
+- `raw_like_sum` と `like_weighted_score` を分けて表示する。
+- 上位コメントの定義を UI または設定で確認できるようにする。
+
+### 人物別魅力分析
+
+- 魅力カテゴリ別件数を出す。
+- tone `positive` / `neutral` / `mixed` / `negative` / `unclear` を分類する。
+- 人物別 AI 要約を生成する。
+- AI 要約の根拠コメントを表示する。
+- negative は過度に強調せず、一定件数以上のみ注意点として表示する。
+
+## MVP-2: 高度分析
+
+MVP-2 は現時点では保留。ただし要件としては残す。
+
+### 共起・関係性分析
+
+- 人物 A と人物 B の同時言及数を集計する。
+- 共起のいいね加重を出す。
+- 共起代表コメントを表示する。
+- 関係性カテゴリを付ける。
+- 共起ネットワークまたはヒートマップを表示する。
+
+### コメントクラスタリング
+
+- embedding または特徴量でコメントをクラスタリングする。
+- クラスタ名、件数、代表コメント、主な人物、頻出キーワードを表示する。
+- AI によるクラスタ説明を生成する。
+- クラスタ数を 5 から 12 程度で調整できるようにする。
+
+### 日本語解析
+
+- 日本語形態素解析を導入する。
+- 固有表現抽出モデルを検討する。
+- 助詞・係り受けを使った alias 文脈判定を検討する。
+- 人物ごとの特徴語を単純頻度だけでなく TF-IDF 的に重み付けする。
+
+## 運用・設定・データ管理
+
+### 設定画面
+
+- YouTube API key の読み込み状態を表示する。
+- API key の値そのものは表示しない。
+- fetch order、reply mode、max comments、差分更新の意味を設定画面でも確認できるようにする。
+- LLM / embedding の有効無効を設定として扱う。
+
+### データ管理
+
+- cache / run / backup の容量を UI で確認できるようにする。
+- 古い run と cache を削除または退避できるようにする。
+- live API test と通常 test を明確に分離する。
+- 生データ export は明示操作として実装する。
+
+### ジョブ実行
+
+- 同時実行ジョブ数 1 の queued 状態を実装する。
+- 実行中に新しい job が来た場合の待機表示を実装する。
+- サーバー再起動後に `running` のまま残った job を `failed_recoverable` にする。
+- 本格的な worker / queue 分離を検討する。
+
+## API / データモデルの残り
+
+- `POST /api/videos/inspect` で必要に応じて動画 metadata を確認できるようにする。
+- `appeal_labels` 相当の保存を実装する。
+- `clusters` 相当の保存を実装する。
+- LLM cache の DB 管理を、現在の `llm_assists` / file cache から要件上の汎用 `llm_cache` に寄せるか判断する。
+- `normalized_comments.jsonl`、`aliases.json`、`clusters.json` artifact の出力方針を決める。
