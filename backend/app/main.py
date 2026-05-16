@@ -140,6 +140,19 @@ def continue_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/runs/{run_id}/llm-assist")
+def llm_assist(run_id: str) -> dict[str, Any]:
+    try:
+        store.get_run_row(run_id)
+        return store.run_llm_assist(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=f"Codex App Server 取得に失敗しました: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM 応答の解析に失敗しました: {exc}") from exc
+
+
 @app.get("/api/runs/{run_id}/report")
 def get_report(run_id: str) -> dict[str, Any]:
     try:

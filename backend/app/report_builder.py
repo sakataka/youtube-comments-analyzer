@@ -93,6 +93,7 @@ def build_report_payload(
     analysis_config: dict[str, Any],
     persons: list[dict[str, Any]],
     alias_suggestions: list[dict[str, Any]],
+    llm_assist: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
     return {
@@ -125,6 +126,7 @@ def build_report_payload(
         "analysis_config": analysis_config,
         "persons": persons,
         "alias_suggestions": alias_suggestions,
+        "llm_assist": llm_assist,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -145,8 +147,9 @@ def build_report_payload(
             "person_candidates": {"status": "available"},
             "alias_suggestions": {"status": "available"},
             "raw_comments": {"status": "available"},
-            "appeal_summary": {"status": "skipped", "reason": "LLM disabled in MVP-0"},
-            "ambiguous_classification": {"status": "skipped", "reason": "LLM disabled in MVP-0"},
+            "llm_assist": {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "Not run yet"},
+            "appeal_summary": {"status": "skipped", "reason": "MVP-1 later scope"},
+            "ambiguous_classification": {"status": "available" if llm_assist else "skipped", "reason": None if llm_assist else "LLM assist not run"},
             "cooccurrence": {"status": "skipped", "reason": "MVP-2 scope"},
             "clusters": {"status": "skipped", "reason": "Embeddings disabled in MVP-0"},
         },

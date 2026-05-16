@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from backend.app.candidate_extraction import extract_candidate_tokens
+from backend.app.llm_assist import parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
@@ -250,6 +251,76 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("ミッタン", suggestions)
             self.assertEqual(suggestions["ミッタン"]["hit_count"], 2)
             self.assertEqual(suggestions["ミッタン"]["suggested_person_name"], "みりちゃむ")
+
+    def test_llm_assist_prompt_and_cache_flow(self):
+        class FakeLlmClient:
+            def __init__(self):
+                self.calls = 0
+
+            def ask(self, prompt: str) -> str:
+                self.calls += 1
+                self.last_prompt = prompt
+                return json.dumps(
+                    {
+                        "candidate_recommendations": [
+                            {
+                                "display_name": "みりちゃむ",
+                                "recommendation": "accept",
+                                "reason": "主要人物として明確",
+                                "target_display_name": None,
+                            }
+                        ],
+                        "alias_recommendations": [
+                            {
+                                "alias": "ミッタン",
+                                "target_display_name": "みりちゃむ",
+                                "confidence": "medium",
+                                "reason": "同じ文脈で出現",
+                            }
+                        ],
+                        "ambiguous_comments": [],
+                        "notes": ["author情報なしで分析"],
+                    },
+                    ensure_ascii=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            bundle = client.fetch_video_bundle(
+                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+            )
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 20,
+                    "reply_fetch_mode": "none",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            store.classify_and_report(run_id)
+            fake = FakeLlmClient()
+            result = store.run_llm_assist(run_id, client=fake)
+            cached = store.run_llm_assist(run_id, client=fake)
+            report = store.build_report(run_id)
+
+            self.assertEqual(fake.calls, 1)
+            self.assertEqual(cached["source"], "cache")
+            self.assertEqual(result["alias_recommendations"][0]["alias"], "ミッタン")
+            self.assertEqual(report["llm_assist"]["candidate_recommendations"][0]["display_name"], "みりちゃむ")
+            self.assertNotIn("author_display_name", fake.last_prompt)
+
+    def test_llm_assist_json_parser_accepts_fenced_json(self):
+        parsed = parse_llm_assist_json(
+            """```json
+{"candidate_recommendations":[],"alias_recommendations":[],"ambiguous_comments":[],"notes":["ok"]}
+```"""
+        )
+        self.assertEqual(parsed["schema_version"], "llm_assist.v1")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 YouTube 動画 URL を入力し、取得したコメントから人物・グループ・関係者への言及を抽出して、人物候補、alias、言及ランキング、代表コメントを確認するローカル Web アプリです。
 
-現在の実装は MVP-0 です。LLM と embedding は使わず、YouTube Data API または fixture からコメントを保存し、ルールベース候補抽出と accepted alias による deterministic な集計を行います。
+現在の実装は MVP-1 の一部です。YouTube Data API または fixture からコメントを保存し、ルールベース候補抽出と accepted alias による deterministic な集計を行います。必要に応じて Codex app server 経由の LLM 補助分析を実行できます。
 
 ## 現在できること
 
@@ -18,6 +18,9 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - 人物候補と alias 候補を表示する
 - 既存 alias にないニックネームらしい頻出表記を未知 alias 候補として表示する
 - 未知 alias 候補を既存人物へ追加し、再集計できる
+- Codex app server 経由で LLM 補助分析を実行する
+- LLM 補助分析で候補整理、alias 補完案、曖昧コメント分類を確認する
+- LLM 補助分析の入力 hash を cache し、同一入力では再利用する
 - 候補・alias を採用または除外する
 - 候補の表示名を編集し、alias を手動追加する
 - 候補を別の人物へ統合する
@@ -58,12 +61,11 @@ cp .env.example .env
 
 ```bash
 YOUTUBE_API_KEY=
-OPENAI_API_KEY=
 DATABASE_URL=
 DATA_DIR=
 ```
 
-`YOUTUBE_API_KEY` が空の場合は fixture を使います。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。
+`YOUTUBE_API_KEY` が空の場合は fixture を使います。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。
 
 ## 起動
 
@@ -97,8 +99,9 @@ Vite は空きポートを自動割り当てします。表示された `Local:`
 9. 「候補を確定して集計」を押す。
 10. 言及ランキング、取得範囲、返信件数、いいね数分布、未知 alias 候補、人物別詳細、代表コメント、section status を確認する。
 11. 未知 alias 候補が人物の別表記なら、紐づけ先を選んで `alias に追加` する。
-12. コメント一覧で本文検索や人物フィルタを使い、根拠コメントを確認する。
-13. 必要に応じてコメント単位で人物紐づけを追加または解除する。
+12. 必要に応じて `LLM 補助を実行` を押し、候補整理、alias 補完案、曖昧コメント分類を確認する。
+13. コメント一覧で本文検索や人物フィルタを使い、根拠コメントを確認する。
+14. 必要に応じてコメント単位で人物紐づけを追加または解除する。
 
 初期検証 URL:
 
@@ -142,7 +145,16 @@ data/runs/<run_id>/
   person_candidates.json
   mentions.jsonl
   report.json
+  llm_assist.json
 ```
+
+LLM 補助分析の結果は、prompt version と入力内容から作った hash で次にも保存します。
+
+```text
+data/llm_cache/<input_hash>.json
+```
+
+同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。
 
 ## 主な API
 
@@ -153,6 +165,7 @@ data/runs/<run_id>/
 - `GET /api/runs/{run_id}/candidates`
 - `POST /api/runs/{run_id}/candidate-actions`
 - `POST /api/runs/{run_id}/continue`
+- `POST /api/runs/{run_id}/llm-assist`
 - `GET /api/runs/{run_id}/report`
 - `GET /api/runs`
 
@@ -165,6 +178,7 @@ backend/
     youtube.py                 YouTube URL parsing, API fetch, cache
     pipeline.py                SQLite schema, run orchestration, persistence
     candidate_extraction.py    rule-based person / alias candidate extraction
+    llm_assist.py              Codex app server LLM assist, prompt, cache
     mention_classification.py  alias matching and mention confidence
     report_builder.py          report JSON assembly and fetch coverage summaries
     text.py                    text normalization
@@ -182,7 +196,8 @@ docs/
 
 - `.env` は Git 管理しません。
 - API key をチャット、ログ、README、ソースコードに貼らないでください。
-- LLM 連携は未実装です。将来実装時も author 情報は LLM に送らない方針です。
+- LLM 補助分析は Codex app server 経由で行い、このアプリ専用の OpenAI API key は使いません。
+- LLM 補助分析には author 情報を送らず、コメント本文と分析済み候補だけを渡します。
 - 現在の API key は Google Cloud Console 側で `YouTube Data API v3` のみに制限してください。
 
 ## ロードマップ

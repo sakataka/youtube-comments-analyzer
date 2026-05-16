@@ -413,6 +413,38 @@ h4 {
   margin: 0 0 6px;
 }
 
+.llm-assist-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.llm-assist-grid > div {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px;
+}
+
+.llm-assist-grid article {
+  background: #fff;
+  border: 1px solid #e1e8f1;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.llm-assist-grid p,
+.llm-assist-grid small {
+  color: #647181;
+  line-height: 1.55;
+  margin: 0;
+}
+
 .report-layout {
   display: grid;
   gap: 18px;
@@ -698,6 +730,7 @@ blockquote {
   .hero,
   .status-panel,
   .report-summary-grid,
+  .llm-assist-grid,
   .report-layout,
   .detail-layout,
   .comment-toolbar,

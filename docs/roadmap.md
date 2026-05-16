@@ -4,7 +4,7 @@
 
 ## 現在の到達点
 
-現在は MVP-0 の vertical slice が動く状態です。
+現在は MVP-1 の一部まで動く状態です。
 
 ```text
 URL 入力
@@ -15,6 +15,7 @@ URL 入力
   -> 候補確認 UI
   -> accepted alias で分類
   -> 人物別ランキング表示
+  -> 必要に応じて Codex app server 経由の LLM 補助分析
 ```
 
 ## 完了
@@ -93,6 +94,28 @@ URL 入力
 - report JSON 組み立てと取得範囲 summary を `report_builder.py` に分離
 - `pipeline.py` は SQLite schema、run orchestration、永続化 API を中心に整理
 - 既存テストの対象 import を新しい責務境界に合わせて更新
+
+### Step 2: Phase 6 inline subset
+
+- `reply_fetch_mode=inline_subset` を追加
+- `commentThreads.list` に同梱される返信コメントを保存
+- 返信コメントを候補抽出・分類・レポート対象に含める
+- 返信件数と返信 badge を UI に表示
+
+### Step 3: MVP-1 未知 alias / ニックネーム候補
+
+- コメント内のニックネームらしい語を未知 alias 候補として抽出
+- 既存人物の accepted alias と同一コメント内で共起する候補に紐づけ先を提案
+- UI から既存人物へ alias として追加し、再集計できる
+
+### Step 4: MVP-1 LLM 候補整理・曖昧分類
+
+- Codex app server 経由の LLM 補助分析 endpoint
+- 候補整理、alias 補完案、曖昧コメント分類の JSON schema
+- prompt version と入力 hash による LLM cache
+- `llm_assists` table と `data/runs/<run_id>/llm_assist.json` artifact 保存
+- LLM 補助分析 UI
+- author 情報を LLM 入力に含めない prompt / input builder
 
 ## 状況詳細
 
@@ -183,6 +206,10 @@ URL 入力
 - 手動紐づけ修正後のランキング再生成
 - 未知 alias / ニックネーム候補サジェスト
 - 未知 alias 候補を既存人物へ追加して再集計する UI
+- LLM 補助分析
+- LLM による候補整理の提案表示
+- LLM による alias 補完案の表示
+- LLM による曖昧コメント分類の表示
 
 後続フェーズへ移動:
 
@@ -226,19 +253,29 @@ YouTube API quota 消費が増えるため、cache と取得概要 UI が安定�
 - コメント内のニックネームらしい語のサジェスト
 - 説明欄・タイトルにない表記の人物紐づけ候補提示
 - 既存人物に対する未知 alias のデルタ分析
+- LLM による候補整理
+- LLM による alias 候補補完
+- 曖昧コメント分類
+- LLM cache
+- prompt version / schema version / input hash による再利用
 
 未実装:
 
-- LLM による候補整理
-- LLM による alias 候補補完
 - 頻出語を「人物候補」「alias 候補」「一般語」「要確認」に分けるレビュー UI
-- 曖昧コメント分類
 - 魅力カテゴリ分類
 - 人物別要約
 - low confidence comments 表示
-- LLM cache
-- prompt version / schema version / input hash による再利用
 - LLM 失敗時の部分 degraded report
+
+## 次に進める順番
+
+1. Phase 7: 過去分析一覧画面
+2. Phase 7: 概要ダッシュボード
+3. Phase 7: グラフ表示
+4. Phase 6: `reply_fetch_mode=full`
+5. Phase 6: 差分更新
+
+MVP-2 の高度分析は一旦保留です。
 
 ### MVP-2: 高度分析
 

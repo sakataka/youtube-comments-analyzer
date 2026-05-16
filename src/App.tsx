@@ -108,6 +108,33 @@ type AliasSuggestion = {
   }>;
 };
 
+type LlmAssist = {
+  schema_version: string;
+  prompt_version: string;
+  provider: string;
+  source: string;
+  input_hash: string;
+  candidate_recommendations: Array<{
+    display_name: string;
+    recommendation: string;
+    reason: string;
+    target_display_name?: string | null;
+  }>;
+  alias_recommendations: Array<{
+    alias: string;
+    target_display_name: string;
+    confidence: string;
+    reason: string;
+  }>;
+  ambiguous_comments: Array<{
+    comment_id: string;
+    suggested_display_name?: string | null;
+    confidence: string;
+    reason: string;
+  }>;
+  notes: string[];
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -135,6 +162,7 @@ type Report = {
   };
   persons: Person[];
   alias_suggestions: AliasSuggestion[];
+  llm_assist?: LlmAssist | null;
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -171,6 +199,7 @@ export default function App() {
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
+  const [llmBusy, setLlmBusy] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
@@ -405,6 +434,23 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runLlmAssist() {
+    if (!run) return;
+    setLlmBusy(true);
+    setLastAction(null);
+    setError(null);
+    try {
+      await api<LlmAssist>(`/api/runs/${run.run_id}/llm-assist`, { method: "POST" });
+      const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
+      setReport(nextReport);
+      setLastAction("LLM 補助分析を更新しました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLlmBusy(false);
     }
   }
 
@@ -782,6 +828,74 @@ export default function App() {
         <section className="panel">
           <div className="section-heading">
             <div>
+              <h2>LLM 補助分析</h2>
+              <p>Codex app server 経由で、候補整理、alias 補完案、曖昧コメントだけをレビュー補助します。</p>
+            </div>
+            <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
+              {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
+            </button>
+          </div>
+          {report.llm_assist ? (
+            <div className="llm-assist-grid">
+              <div>
+                <h3>候補整理</h3>
+                {report.llm_assist.candidate_recommendations.length ? (
+                  report.llm_assist.candidate_recommendations.map((item, index) => (
+                    <article key={`${item.display_name}-${index}`}>
+                      <strong>
+                        {item.display_name} / {llmRecommendationLabel(item.recommendation)}
+                      </strong>
+                      {item.target_display_name ? <small>統合候補: {item.target_display_name}</small> : null}
+                      <p>{item.reason}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p>提案はありません。</p>
+                )}
+              </div>
+              <div>
+                <h3>alias 補完案</h3>
+                {report.llm_assist.alias_recommendations.length ? (
+                  report.llm_assist.alias_recommendations.map((item, index) => (
+                    <article key={`${item.alias}-${index}`}>
+                      <strong>
+                        {item.alias} → {item.target_display_name}
+                      </strong>
+                      <small>confidence: {item.confidence}</small>
+                      <p>{item.reason}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p>提案はありません。</p>
+                )}
+              </div>
+              <div>
+                <h3>曖昧コメント</h3>
+                {report.llm_assist.ambiguous_comments.length ? (
+                  report.llm_assist.ambiguous_comments.map((item) => (
+                    <article key={item.comment_id}>
+                      <strong>{item.suggested_display_name || "紐づけなし"}</strong>
+                      <small>
+                        {item.comment_id} / {item.confidence}
+                      </small>
+                      <p>{item.reason}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p>提案はありません。</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="list-note">まだ LLM 補助分析は実行していません。</p>
+          )}
+        </section>
+      ) : null}
+
+      {report ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
               <h2>未知 alias 候補</h2>
               <p>既存 alias に入っていない、ニックネームらしい頻出表記です。人物に紐づけると再集計します。</p>
             </div>
@@ -1055,6 +1169,14 @@ function replyFetchModeLabel(mode: string): string {
   if (mode === "inline_subset") return "API同梱返信を含む";
   if (mode === "full") return "返信を全件取得";
   return mode;
+}
+
+function llmRecommendationLabel(value: string): string {
+  if (value === "accept") return "採用推奨";
+  if (value === "reject") return "除外推奨";
+  if (value === "merge") return "統合推奨";
+  if (value === "review") return "要確認";
+  return value;
 }
 
 function formatNullableNumber(value?: number | null): string {

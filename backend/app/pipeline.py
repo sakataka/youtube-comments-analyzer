@@ -10,6 +10,15 @@ from typing import Any
 from .text import normalize_alias, normalize_text
 from .alias_suggestions import build_alias_suggestions
 from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
+from .llm_assist import (
+    CodexAppServerClient,
+    LlmClient,
+    build_llm_assist_prompt,
+    llm_cache_key,
+    parse_llm_assist_json,
+    read_cached_llm_assist,
+    write_cached_llm_assist,
+)
 from .mention_classification import alias_match_confidence, alias_matches
 from .report_builder import build_report_payload, fetch_coverage_summary
 
@@ -138,6 +147,17 @@ def init_db(conn: sqlite3.Connection) -> None:
           comment_id text not null,
           person_id text not null,
           action_type text not null,
+          created_at text not null
+        );
+        create table if not exists llm_assists (
+          id text primary key,
+          analysis_run_id text not null,
+          input_hash text not null,
+          prompt_version text not null,
+          provider text not null,
+          status text not null,
+          result_json text not null,
+          raw_text text,
           created_at text not null
         );
         """
@@ -602,7 +622,62 @@ class AnalysisStore:
             analysis_config=json.loads(run["config_json"]),
             persons=persons,
             alias_suggestions=build_alias_suggestions(comments, persons),
+            llm_assist=self.get_latest_llm_assist(run_id),
         )
+
+    def run_llm_assist(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
+        report = self.build_report(run_id)
+        prompt = build_llm_assist_prompt(report)
+        cache_key = llm_cache_key(prompt)
+        cache_dir = self.data_dir / "llm_cache"
+        cached = read_cached_llm_assist(cache_dir, cache_key)
+        if cached:
+            result = {**cached, "source": "cache", "input_hash": cache_key}
+            self.save_llm_assist(run_id, cache_key, result, raw_text=None, status="completed")
+            self._write_run_artifact(run_id, "llm_assist.json", result)
+            return result
+
+        active_client = client or CodexAppServerClient()
+        raw_text = active_client.ask(prompt)
+        parsed = parse_llm_assist_json(raw_text)
+        result = {**parsed, "source": "codex_app_server", "input_hash": cache_key}
+        write_cached_llm_assist(cache_dir, cache_key, result)
+        self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")
+        self._write_run_artifact(run_id, "llm_assist.json", result)
+        return result
+
+    def save_llm_assist(
+        self,
+        run_id: str,
+        input_hash: str,
+        result: dict[str, Any],
+        raw_text: str | None,
+        status: str,
+    ) -> None:
+        self.conn.execute(
+            "insert into llm_assists values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_id("llm"),
+                run_id,
+                input_hash,
+                result.get("prompt_version") or "",
+                result.get("provider") or "codex_app_server",
+                status,
+                json.dumps(result, ensure_ascii=False),
+                raw_text,
+                utc_now(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_latest_llm_assist(self, run_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "select result_json from llm_assists where analysis_run_id = ? order by created_at desc limit 1",
+            (run_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["result_json"])
 
     def get_candidates(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
