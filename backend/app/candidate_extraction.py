@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .text import normalize_alias
-from .text_filters import is_noise_keyword
+from .text_filters import is_noise_keyword, person_alias_terms
 
 
 HONORIFIC_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
@@ -206,6 +206,7 @@ def extract_candidate_tokens(
     if not text:
         return []
     tokens: list[str] = []
+    tokens.extend(person_alias_terms(text))
     tokens.extend(match.group(1) for match in HONORIFIC_RE.finditer(text))
     tokens.extend(match.group(0) for match in KANJI_KATAKANA_RE.finditer(text))
     tokens.extend(match.group(0) for match in KATAKANA_RE.finditer(text))

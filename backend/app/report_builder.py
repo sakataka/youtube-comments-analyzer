@@ -6,7 +6,7 @@ from itertools import combinations
 from typing import Any
 
 from .text import normalize_alias
-from .text_filters import is_noise_keyword, keyword_tokens
+from .text_filters import evaluation_terms, is_noise_keyword, keyword_tokens
 
 
 APPEAL_CATEGORIES = [
@@ -166,6 +166,7 @@ def build_appeal_summary(mentions: list[Any]) -> dict[str, Any]:
         comments = list(person["comments_by_id"].values())
         category_counts = appeal_category_counts(comments)
         tone_counts = tone_count_summary(comments)
+        evaluation_summary = build_person_evaluation_summary(comments, person["display_name"])
         dominant_categories = [category for category in category_counts if category["count"] > 0][:3]
         evidence_comments = sorted(comments, key=lambda comment: int(comment["like_count"]), reverse=True)[:4]
         negative_count = tone_counts["negative"]
@@ -178,6 +179,7 @@ def build_appeal_summary(mentions: list[Any]) -> dict[str, Any]:
             "dominant_tone": dominant_tone(tone_counts),
             "summary": appeal_summary_text(person["display_name"], dominant_categories, tone_counts),
             "feature_words": person_feature_words(comments, [person["display_name"]]),
+            "evaluation_summary": evaluation_summary,
             "evidence_comments": evidence_comments,
             "negative_note": negative_note_text(negative_count, len(comments)),
         })
@@ -220,6 +222,33 @@ def tone_count_summary(comments: list[dict[str, Any]]) -> dict[str, int]:
         else:
             counts["neutral"] += 1
     return counts
+
+
+def build_person_evaluation_summary(comments: list[dict[str, Any]], display_name: str) -> dict[str, Any]:
+    counts = {"positive": 0, "negative": 0}
+    evidence = []
+    for comment in comments:
+        terms = evaluation_terms(comment["text_original"])
+        if not terms:
+            continue
+        for term in terms:
+            counts[term["polarity"]] += 1
+        if len(evidence) < 5:
+            evidence.append({
+                "comment_id": comment["comment_id"],
+                "text_original": comment["text_original"],
+                "like_count": comment["like_count"],
+                "terms": terms,
+            })
+    dominant = "positive" if counts["positive"] >= counts["negative"] else "negative"
+    if counts["positive"] == 0 and counts["negative"] == 0:
+        dominant = "none"
+    return {
+        "target_display_name": display_name,
+        "counts": counts,
+        "dominant": dominant,
+        "evidence_comments": evidence,
+    }
 
 
 def dominant_tone(tone_counts: dict[str, int]) -> str:

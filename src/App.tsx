@@ -184,6 +184,17 @@ type AppealPersonSummary = {
     document_count: number;
     score: number;
   }>;
+  evaluation_summary: {
+    target_display_name: string;
+    counts: { positive: number; negative: number };
+    dominant: string;
+    evidence_comments: Array<{
+      comment_id: string;
+      text_original: string;
+      like_count: number;
+      terms: Array<{ term: string; polarity: string }>;
+    }>;
+  };
   evidence_comments: Array<{
     comment_id: string;
     text_original: string;
@@ -1663,7 +1674,28 @@ export default function App() {
                       </div>
                       {selectedPersonDetails.appeal.negative_note ? <small>{selectedPersonDetails.appeal.negative_note}</small> : null}
                     </div>
+                    <div>
+                      <strong>評価語文脈</strong>
+                      <div className="tone-grid">
+                        <span>
+                          positive <b>{selectedPersonDetails.appeal.evaluation_summary.counts.positive}</b>
+                        </span>
+                        <span>
+                          negative <b>{selectedPersonDetails.appeal.evaluation_summary.counts.negative}</b>
+                        </span>
+                        <span>
+                          dominant <b>{selectedPersonDetails.appeal.evaluation_summary.dominant}</b>
+                        </span>
+                      </div>
+                    </div>
                   </div>
+                  {selectedPersonDetails.appeal.evaluation_summary.evidence_comments.length ? (
+                    <div className="feature-list">
+                      {selectedPersonDetails.appeal.evaluation_summary.evidence_comments.flatMap((comment) =>
+                        comment.terms.map((term) => <span key={`${comment.comment_id}-${term.term}`}>{term.term}</span>)
+                      )}
+                    </div>
+                  ) : null}
                   <div className="comment-list">
                     {selectedPersonDetails.appeal.evidence_comments.slice(0, 3).map((comment) => (
                       <article className="comment-row" key={comment.comment_id}>

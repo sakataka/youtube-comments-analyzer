@@ -7,7 +7,7 @@ from typing import Any
 from .candidate_extraction import is_generic_candidate
 from .mention_classification import alias_matches
 from .text import normalize_alias
-from .text_filters import is_noise_keyword
+from .text_filters import is_noise_keyword, person_alias_terms
 
 
 NICKNAME_TOKEN_RE = re.compile(r"[ァ-ヶー]{3,12}|[ぁ-んー]{3,12}|[一-龥々]{2,6}(?:ちゃん|さん|くん|君)")
@@ -99,6 +99,7 @@ def build_alias_suggestions(
 
 def extract_nickname_like_tokens(text: str) -> list[str]:
     output: list[str] = []
+    output.extend(person_alias_terms(text))
     for match in NICKNAME_TOKEN_RE.finditer(text):
         token = match.group(0).strip()
         token = re.sub(r"(さん|ちゃん|くん|君)$", "", token)

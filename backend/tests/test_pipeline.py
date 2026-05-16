@@ -9,7 +9,7 @@ from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assis
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.report_builder import person_feature_words
-from backend.app.text_filters import is_noise_keyword, keyword_tokens
+from backend.app.text_filters import evaluation_terms, is_noise_keyword, keyword_tokens, person_alias_terms
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
 
@@ -44,11 +44,23 @@ class PipelineTest(unittest.TestCase):
         tokens = keyword_tokens("みりちゃむの返し最高ですよでしたしてる")
         self.assertIn("返し", tokens)
         self.assertIn("最高", tokens)
+        self.assertNotIn("みりちゃむ", tokens)
         self.assertNotIn("です", tokens)
         self.assertNotIn("よ", tokens)
         self.assertNotIn("でし", tokens)
         self.assertNotIn("た", tokens)
         self.assertNotIn("てる", tokens)
+
+    def test_person_alias_terms_and_evaluation_terms_are_separated(self):
+        aliases = person_alias_terms("みりちゃむの返し最高。立野沙紀さんもミッタンも好き")
+        self.assertIn("みりちゃむ", aliases)
+        self.assertIn("立野沙紀", aliases)
+        self.assertIn("ミッタン", aliases)
+        self.assertNotIn("最高", aliases)
+        terms = evaluation_terms("みりちゃむの返し最高。ミッタンも好きだけど苦手な人もいる")
+        self.assertIn({"term": "最高", "polarity": "positive"}, terms)
+        self.assertIn({"term": "好き", "polarity": "positive"}, terms)
+        self.assertIn({"term": "苦手", "polarity": "negative"}, terms)
 
     def test_person_feature_words_exclude_noise_terms(self):
         words = person_feature_words(
@@ -144,6 +156,7 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("tone_counts", report["appeal_summary"]["people"][0])
             self.assertIn("evidence_comments", report["appeal_summary"]["people"][0])
             self.assertIn("feature_words", report["appeal_summary"]["people"][0])
+            self.assertIn("evaluation_summary", report["appeal_summary"]["people"][0])
             self.assertEqual(report["sections"]["cooccurrence"]["status"], "available")
             self.assertIn("pairs", report["cooccurrence"])
             self.assertIn("matrix", report["cooccurrence"])

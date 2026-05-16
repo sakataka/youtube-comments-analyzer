@@ -98,6 +98,14 @@ _FUNCTION_POS = {"助詞", "助動詞", "補助記号", "記号", "空白"}
 _CONTENT_POS = {"名詞", "動詞", "形容詞", "形状詞"}
 _NON_INDEPENDENT_POS2 = {"非自立可能"}
 _TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶーA-Za-z]{2,24}")
+_HONORIFIC_TERM_RE = re.compile(r"([一-龥々ぁ-んァ-ヶA-Za-z0-9ー]{2,16}?)(さん|ちゃん|くん|君|氏|様)")
+_NICKNAME_TERM_RE = re.compile(r"[ァ-ヶー]{3,16}|[ぁ-んー]{3,12}")
+_KANJI_NAME_RE = re.compile(r"[一-龥々]{2,6}")
+_KANJI_KATAKANA_NAME_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
+EVALUATION_KEYWORDS = {
+    "positive": ("好き", "最高", "良い", "いい", "素敵", "尊敬", "面白い", "面白", "かわいい", "可愛い", "綺麗", "すごい", "推し"),
+    "negative": ("嫌い", "苦手", "つまらない", "つまら", "無理", "怖い", "ひどい", "嫌"),
+}
 
 
 def analyze_japanese(text: str) -> list[JapaneseToken]:
@@ -160,10 +168,73 @@ def is_content_keyword_token(token: JapaneseToken) -> bool:
 def keyword_tokens(text: str) -> list[str]:
     analyzed = analyze_japanese(text)
     if analyzed:
-        tokens = [token.surface for token in analyzed if is_content_keyword_token(token)]
+        tokens = [token.surface for token in analyzed if is_content_keyword_token(token) and not is_person_alias_like(token.surface)]
     else:
         tokens = _TOKEN_RE.findall(text)
     return filter_keywords(tokens)
+
+
+def is_person_alias_like(term: str) -> bool:
+    normalized = normalize_alias(term)
+    if not normalized or is_noise_keyword(term):
+        return False
+    if re.search(r"\d", normalized):
+        return False
+    if _HONORIFIC_TERM_RE.fullmatch(term):
+        return True
+    if _KANJI_KATAKANA_NAME_RE.fullmatch(term):
+        return True
+    if _NICKNAME_TERM_RE.fullmatch(term):
+        return True
+    tokens = analyze_japanese(term)
+    if tokens and all(is_person_name_token(token) for token in tokens):
+        return True
+    return bool(_KANJI_NAME_RE.fullmatch(term) and len(normalized) >= 3)
+
+
+def is_person_name_token(token: JapaneseToken) -> bool:
+    return len(token.pos) >= 4 and token.pos[0] == "名詞" and token.pos[1] == "固有名詞" and token.pos[2] == "人名"
+
+
+def person_alias_terms(text: str) -> list[str]:
+    terms: list[str] = []
+    terms.extend(match.group(1) for match in _HONORIFIC_TERM_RE.finditer(text))
+    terms.extend(match.group(0) for match in _KANJI_KATAKANA_NAME_RE.finditer(text))
+    terms.extend(match.group(0) for match in _NICKNAME_TERM_RE.finditer(text))
+    analyzed = analyze_japanese(text)
+    name_buffer: list[str] = []
+    for token in analyzed:
+        if is_person_name_token(token):
+            name_buffer.append(token.surface)
+            continue
+        if name_buffer:
+            terms.append("".join(name_buffer))
+            name_buffer = []
+    if name_buffer:
+        terms.append("".join(name_buffer))
+    cleaned = [clean_person_alias_term(term) for term in terms]
+    return filter_keywords([term for term in cleaned if is_person_alias_like(term)])
+
+
+def clean_person_alias_term(term: str) -> str:
+    return re.sub(r"[はがもにをでとの]$", "", term.strip())
+
+
+def evaluation_terms(text: str) -> list[dict[str, str]]:
+    terms = []
+    for polarity, keywords in EVALUATION_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in text:
+                terms.append({"term": keyword, "polarity": polarity})
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for term in terms:
+        key = (term["term"], term["polarity"])
+        if key in seen:
+            continue
+        unique.append(term)
+        seen.add(key)
+    return unique
 
 
 def filter_keywords(terms: Iterable[str], excluded_terms: Iterable[str] = ()) -> list[str]:
