@@ -178,6 +178,8 @@ type Report = {
   }>;
 };
 
+type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "comments";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -197,6 +199,7 @@ export default function App() {
   const [maxComments, setMaxComments] = useState(5000);
   const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset" | "full">("none");
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [activeTab, setActiveTab] = useState<ResultTab>("candidates");
   const [run, setRun] = useState<RunState | null>(null);
   const [runHistory, setRunHistory] = useState<RunState[]>([]);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
@@ -325,6 +328,7 @@ export default function App() {
       }
       setRun(state);
       setCandidates(nextCandidates);
+      setActiveTab(nextReport ? "dashboard" : "candidates");
       setReport(nextReport);
       setUrl(state.video?.url ?? url);
       setMaxComments(state.fetch_summary?.max_comments_requested ?? maxComments);
@@ -360,6 +364,7 @@ export default function App() {
       const nextCandidates = await api<CandidatesResponse>(`/api/runs/${created.run_id}/candidates`);
       setRun(state);
       setCandidates(nextCandidates);
+      setActiveTab("candidates");
       await refreshRunHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -441,6 +446,7 @@ export default function App() {
       const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
       setRun(state);
       setReport(nextReport);
+      setActiveTab("dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -679,7 +685,60 @@ export default function App() {
         </section>
       ) : null}
 
-      {candidates ? (
+      {candidates || report ? (
+        <nav className="result-tabs" aria-label="分析結果の表示切り替え">
+          <button
+            type="button"
+            className={activeTab === "candidates" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("candidates")}
+            disabled={!candidates}
+          >
+            候補確認
+          </button>
+          <button
+            type="button"
+            className={activeTab === "dashboard" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("dashboard")}
+            disabled={!report}
+          >
+            概要
+          </button>
+          <button
+            type="button"
+            className={activeTab === "llm" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("llm")}
+            disabled={!report}
+          >
+            LLM補助
+          </button>
+          <button
+            type="button"
+            className={activeTab === "aliases" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("aliases")}
+            disabled={!report}
+          >
+            未知alias
+          </button>
+          <button
+            type="button"
+            className={activeTab === "details" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("details")}
+            disabled={!report}
+          >
+            人物詳細
+          </button>
+          <button
+            type="button"
+            className={activeTab === "comments" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("comments")}
+            disabled={!report}
+          >
+            コメント
+          </button>
+        </nav>
+      ) : null}
+
+      {candidates && activeTab === "candidates" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -853,7 +912,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report ? (
+      {report && activeTab === "dashboard" ? (
         <section className="panel dashboard-panel">
           <div className="section-heading">
             <div>
@@ -1001,7 +1060,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report ? (
+      {report && activeTab === "llm" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -1069,7 +1128,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report ? (
+      {report && activeTab === "aliases" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -1147,7 +1206,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && selectedDetailPerson && selectedPersonDetails ? (
+      {report && selectedDetailPerson && selectedPersonDetails && activeTab === "details" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -1214,7 +1273,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report ? (
+      {report && activeTab === "comments" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
