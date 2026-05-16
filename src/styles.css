@@ -138,6 +138,43 @@ select {
   padding: 10px 12px;
 }
 
+.history-panel {
+  box-shadow: none;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-card {
+  align-items: center;
+  background: #fbfcfe;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.history-card--active {
+  border-color: #89b4ff;
+  box-shadow: inset 3px 0 0 #175ddc;
+}
+
+.history-card h3 {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.history-card p,
+.history-card small {
+  color: #647181;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .label {
   color: #697789;
   display: block;
@@ -734,7 +771,8 @@ blockquote {
   .report-layout,
   .detail-layout,
   .comment-toolbar,
-  .comment-assign {
+  .comment-assign,
+  .history-card {
     grid-template-columns: 1fr;
   }
 

@@ -117,6 +117,13 @@ URL 入力
 - LLM 補助分析 UI
 - author 情報を LLM 入力に含めない prompt / input builder
 
+### Step 5: Phase 7 過去分析一覧
+
+- `GET /api/runs` の run summary に作成日時・更新日時を追加
+- 保存済み run の一覧 UI
+- 過去 run を開いて候補・既存 report を復元する UI
+- 取得 source、取得件数、返信モードを一覧で確認する表示
+
 ## 状況詳細
 
 ### 動画・取得概要
@@ -210,11 +217,12 @@ URL 入力
 - LLM による候補整理の提案表示
 - LLM による alias 補完案の表示
 - LLM による曖昧コメント分類の表示
+- 過去分析一覧画面
+- 過去分析からの候補・レポート再表示
 
 後続フェーズへ移動:
 
 - 概要ダッシュボード
-- 過去分析一覧画面
 - 設定画面
 - グラフ表示
 
@@ -269,11 +277,10 @@ YouTube API quota 消費が増えるため、cache と取得概要 UI が安定�
 
 ## 次に進める順番
 
-1. Phase 7: 過去分析一覧画面
-2. Phase 7: 概要ダッシュボード
-3. Phase 7: グラフ表示
-4. Phase 6: `reply_fetch_mode=full`
-5. Phase 6: 差分更新
+1. Phase 7: 概要ダッシュボード
+2. Phase 7: グラフ表示
+3. Phase 6: `reply_fetch_mode=full`
+4. Phase 6: 差分更新
 
 MVP-2 の高度分析は一旦保留です。
 

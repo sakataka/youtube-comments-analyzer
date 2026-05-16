@@ -746,6 +746,7 @@ class AnalysisStore:
             "stage": run["stage"],
             "progress": run["progress"],
             "error_message": run["error_message"],
+            "created_at": run["created_at"],
             "video": {
                 "youtube_video_id": video["youtube_video_id"],
                 "url": video["url"],

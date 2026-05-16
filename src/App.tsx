@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type RunState = {
   run_id: string;
@@ -6,6 +6,7 @@ type RunState = {
   stage: string;
   progress: number;
   error_message?: string | null;
+  created_at?: string;
   video?: VideoSummary;
   fetch_summary?: {
     source: string;
@@ -196,6 +197,7 @@ export default function App() {
   const [maxComments, setMaxComments] = useState(5000);
   const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset">("none");
   const [run, setRun] = useState<RunState | null>(null);
+  const [runHistory, setRunHistory] = useState<RunState[]>([]);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
@@ -274,6 +276,47 @@ export default function App() {
     };
   }, [report, selectedDetailPerson]);
 
+  useEffect(() => {
+    void refreshRunHistory();
+  }, []);
+
+  async function refreshRunHistory() {
+    try {
+      const response = await api<{ runs: RunState[] }>("/api/runs");
+      setRunHistory(response.runs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function openRun(runId: string) {
+    setBusy(true);
+    setLastAction(null);
+    setError(null);
+    setReport(null);
+    try {
+      const state = await api<RunState>(`/api/runs/${runId}`);
+      const nextCandidates = await api<CandidatesResponse>(`/api/runs/${runId}/candidates`);
+      let nextReport: Report | null = null;
+      try {
+        nextReport = await api<Report>(`/api/runs/${runId}/report`);
+      } catch {
+        nextReport = null;
+      }
+      setRun(state);
+      setCandidates(nextCandidates);
+      setReport(nextReport);
+      setUrl(state.video?.url ?? url);
+      setMaxComments(state.fetch_summary?.max_comments_requested ?? maxComments);
+      setReplyFetchMode((state.fetch_summary?.reply_fetch_mode as "none" | "inline_subset") ?? replyFetchMode);
+      setLastAction("過去分析を読み込みました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startRun(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -296,6 +339,7 @@ export default function App() {
       const nextCandidates = await api<CandidatesResponse>(`/api/runs/${created.run_id}/candidates`);
       setRun(state);
       setCandidates(nextCandidates);
+      await refreshRunHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -493,6 +537,41 @@ export default function App() {
       </section>
 
       {error ? <div className="error-box">{error}</div> : null}
+
+      <section className="panel history-panel">
+        <div className="section-heading">
+          <div>
+            <h2>過去分析</h2>
+            <p>保存済み run を読み込みます。同じ取得条件のコメントは cache から再利用されます。</p>
+          </div>
+          <button type="button" onClick={refreshRunHistory} disabled={busy}>
+            更新
+          </button>
+        </div>
+        {runHistory.length ? (
+          <div className="history-list">
+            {runHistory.map((historyRun) => (
+              <article className={historyRun.run_id === run?.run_id ? "history-card history-card--active" : "history-card"} key={historyRun.run_id}>
+                <div>
+                  <h3>{historyRun.video?.title || historyRun.video?.youtube_video_id || historyRun.run_id}</h3>
+                  <p>
+                    {historyRun.video?.channel_title || "チャンネル未取得"} / {formatDateTime(historyRun.created_at)}
+                  </p>
+                  <small>
+                    {sourceLabel(historyRun.fetch_summary?.source ?? "")} / {historyRun.fetch_summary?.max_comments_fetched ?? 0} 件 /{" "}
+                    {replyFetchModeLabel(historyRun.fetch_summary?.reply_fetch_mode ?? "none")}
+                  </small>
+                </div>
+                <button type="button" onClick={() => openRun(historyRun.run_id)} disabled={busy}>
+                  開く
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="list-note">保存済み run はまだありません。</p>
+        )}
+      </section>
 
       {run ? (
         <section className="panel status-panel">
@@ -1181,6 +1260,11 @@ function llmRecommendationLabel(value: string): string {
 
 function formatNullableNumber(value?: number | null): string {
   return typeof value === "number" ? value.toLocaleString("ja-JP") : "未取得";
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return "日時未取得";
+  return new Date(value).toLocaleString("ja-JP");
 }
 
 function coverageLabel(status: string): string {
