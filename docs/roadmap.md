@@ -6,14 +6,6 @@
 
 ## MVP-1: 分析品質
 
-### 人物候補と alias
-
-- `person`, `group`, `duo` 以外の entity type を折りたたみ・フィルタ表示する。
-- alias 削除を UI から行えるようにする。
-- 誤って統合された候補を分割できるようにする。
-- LLM なしの初期検証動画で alias 誤爆を確認し、抑制ルールを追加する。
-- confidence 表示を「候補信頼度」「alias 信頼度」「分類信頼度」など文脈別に整理する。
-
 ### 低信頼・曖昧コメント
 
 - low confidence comments を一覧表示する。

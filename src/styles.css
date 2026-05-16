@@ -462,9 +462,35 @@ h4 {
   margin-top: 6px;
 }
 
+.confidence-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.confidence-line span,
+.filter-bar small {
+  background: #eef3f8;
+  border-radius: 999px;
+  color: #465668;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
 .candidate-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  margin: 14px 0;
+}
+
+.filter-bar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   margin: 14px 0;
 }
 
@@ -512,6 +538,11 @@ h4 {
   background: #4f5d6d;
   color: #fff;
   opacity: 1;
+}
+
+.choice-button--danger {
+  background: #fde8e8;
+  color: #9a1c1c;
 }
 
 .status {
@@ -574,7 +605,7 @@ h4 {
   border-radius: 8px;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(70px, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(70px, 1fr) auto auto auto auto auto;
   padding: 8px;
 }
 
@@ -1374,6 +1405,7 @@ blockquote {
   .detail-layout,
   .comment-toolbar,
   .comment-assign,
+  .filter-bar,
   .history-card {
     grid-template-columns: 1fr;
   }

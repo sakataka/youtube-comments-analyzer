@@ -437,6 +437,8 @@ class AnalysisStore:
                 )
             elif action_type == "reject_alias":
                 self.conn.execute("update aliases set status = 'rejected' where id = ? and analysis_run_id = ?", (action["alias_id"], run_id))
+            elif action_type == "delete_alias":
+                self.conn.execute("delete from aliases where id = ? and analysis_run_id = ?", (action["alias_id"], run_id))
             elif action_type == "add_alias":
                 alias_text = action["alias_text"].strip()
                 if not alias_text:
@@ -468,6 +470,8 @@ class AnalysisStore:
                 if source_person_id == target_person_id:
                     continue
                 self.merge_person_aliases(run_id, source_person_id, target_person_id)
+            elif action_type == "split_merged_person":
+                self.split_merged_person(run_id, action["person_id"])
             self.conn.execute(
                 "insert into candidate_action_logs values (?, ?, ?, ?, ?)",
                 (new_id("action"), run_id, action_type, json.dumps(action, ensure_ascii=False), utc_now()),
@@ -507,6 +511,58 @@ class AnalysisStore:
         self.conn.execute(
             "update persons set status = 'rejected', reason = ? where id = ? and analysis_run_id = ?",
             ("別の人物候補に統合済み", source_person_id, run_id),
+        )
+
+    def split_merged_person(self, run_id: str, person_id: str) -> None:
+        person = self.conn.execute(
+            "select * from persons where id = ? and analysis_run_id = ?",
+            (person_id, run_id),
+        ).fetchone()
+        if not person or person["reason"] != "別の人物候補に統合済み":
+            return
+        merge_log = self.conn.execute(
+            """
+            select payload_json from candidate_action_logs
+            where analysis_run_id = ? and action_type = 'merge_person'
+            order by created_at desc
+            """,
+            (run_id,),
+        ).fetchall()
+        target_person_id = None
+        for row in merge_log:
+            payload = json.loads(row["payload_json"])
+            if payload.get("source_person_id") == person_id:
+                target_person_id = payload.get("target_person_id")
+                break
+        normalized_person = normalize_alias(person["canonical_name"] or person["display_name"])
+        if target_person_id:
+            self.conn.execute(
+                """
+                update aliases
+                set person_id = ?, status = 'accepted'
+                where analysis_run_id = ? and person_id = ? and normalized_alias = ?
+                """,
+                (person_id, run_id, target_person_id, normalized_person),
+            )
+        has_alias = self.conn.execute(
+            "select id from aliases where analysis_run_id = ? and person_id = ? and normalized_alias = ?",
+            (run_id, person_id, normalized_person),
+        ).fetchone()
+        if not has_alias:
+            self._insert_alias(
+                run_id=run_id,
+                person_id=person_id,
+                token=person["display_name"],
+                normalized=normalized_person,
+                source="split_restore",
+                hit_count=0,
+                confidence=0.72,
+                status="accepted",
+                representative_ids=[],
+            )
+        self.conn.execute(
+            "update persons set status = 'accepted', reason = ? where id = ? and analysis_run_id = ?",
+            ("統合解除により復元", person_id, run_id),
         )
 
     def classify_and_report(self, run_id: str) -> dict[str, Any]:

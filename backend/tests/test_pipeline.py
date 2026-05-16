@@ -115,6 +115,25 @@ class PipelineTest(unittest.TestCase):
             merged_by_name = {person["display_name"]: person for person in merged_candidates["persons"]}
             self.assertEqual(merged_by_name["ニシダ"]["status"], "rejected")
             self.assertIn("ニシダ", {alias["alias_text"] for alias in merged_by_name["みりちゃむ"]["aliases"]})
+            store.apply_candidate_actions(
+                run_id,
+                [
+                    {
+                        "type": "split_merged_person",
+                        "person_id": merged_by_name["ニシダ"]["person_id"],
+                    }
+                ],
+            )
+            split_candidates = store.get_candidates(run_id)
+            split_by_name = {person["display_name"]: person for person in split_candidates["persons"]}
+            self.assertEqual(split_by_name["ニシダ"]["status"], "accepted")
+            self.assertIn("ニシダ", {alias["alias_text"] for alias in split_by_name["ニシダ"]["aliases"]})
+            self.assertNotIn("ニシダ", {alias["alias_text"] for alias in split_by_name["みりちゃむ"]["aliases"]})
+            alias_to_delete = split_by_name["ニシダ"]["aliases"][0]["alias_id"]
+            store.apply_candidate_actions(run_id, [{"type": "delete_alias", "alias_id": alias_to_delete}])
+            deleted_alias_candidates = store.get_candidates(run_id)
+            deleted_by_name = {person["display_name"]: person for person in deleted_alias_candidates["persons"]}
+            self.assertNotIn(alias_to_delete, {alias["alias_id"] for alias in deleted_by_name["ニシダ"]["aliases"]})
             if "バランス" in by_name:
                 self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)

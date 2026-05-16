@@ -276,6 +276,7 @@ type Report = {
 
 type ResultTab = "candidates" | "dashboard" | "llm" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
+type CandidateEntityFilter = "primary" | "non_primary" | "all";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -313,6 +314,7 @@ export default function App() {
   const [ignoredAliasSuggestions, setIgnoredAliasSuggestions] = useState<Record<string, boolean>>({});
   const [aliasSuggestionReview, setAliasSuggestionReview] = useState<Record<string, AliasReviewState>>({});
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
+  const [candidateEntityFilter, setCandidateEntityFilter] = useState<CandidateEntityFilter>("primary");
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
@@ -326,9 +328,17 @@ export default function App() {
       accepted: persons.filter((person) => person.status === "accepted").length,
       rejected: persons.filter((person) => person.status === "rejected").length,
       pending: persons.filter((person) => person.status !== "accepted" && person.status !== "rejected").length,
-      total: persons.length
+      total: persons.length,
+      nonPrimary: persons.filter((person) => !isPrimaryEntityType(person.entity_type)).length
     };
   }, [candidates]);
+
+  const visibleCandidatePersons = useMemo(() => {
+    const persons = candidates?.persons ?? [];
+    if (candidateEntityFilter === "all") return persons;
+    if (candidateEntityFilter === "non_primary") return persons.filter((person) => !isPrimaryEntityType(person.entity_type));
+    return persons.filter((person) => isPrimaryEntityType(person.entity_type));
+  }, [candidateEntityFilter, candidates]);
 
   const commentPersonOptions = useMemo(() => {
     return report?.rankings.mention_ranking.map((row) => ({ person_id: row.person_id, display_name: row.display_name })) ?? [];
@@ -564,6 +574,13 @@ export default function App() {
       `${person.display_name} を ${target?.display_name ?? "選択した人物"} に統合しました`
     );
     setMergeDrafts((drafts) => ({ ...drafts, [person.person_id]: "" }));
+  }
+
+  async function splitMergedPerson(person: Person) {
+    await updateCandidate(
+      { type: "split_merged_person", person_id: person.person_id },
+      `${person.display_name} の統合を解除しました`
+    );
   }
 
   async function continueRun() {
@@ -1010,10 +1027,22 @@ export default function App() {
             <strong>採用 {candidateSummary.accepted} 件</strong>
             <span>保留 {candidateSummary.pending} 件</span>
             <span>除外 {candidateSummary.rejected} 件</span>
+            <span>人物外候補 {candidateSummary.nonPrimary} 件</span>
             {lastAction ? <em>{lastAction}</em> : null}
           </div>
+          <div className="filter-bar">
+            <label>
+              候補の表示範囲
+              <select value={candidateEntityFilter} onChange={(event) => setCandidateEntityFilter(event.target.value as CandidateEntityFilter)}>
+                <option value="primary">人物・グループ・コンビのみ</option>
+                <option value="non_primary">人物外候補のみ</option>
+                <option value="all">すべて表示</option>
+              </select>
+            </label>
+            <small>channel など人物以外の候補は初期表示から分けています。</small>
+          </div>
           <div className="candidate-grid">
-            {candidates.persons.map((person) => (
+            {visibleCandidatePersons.map((person) => (
               <article className={`candidate-card candidate-card--${person.status}`} key={person.person_id}>
                 <div className="candidate-card__header">
                   <div>
@@ -1022,6 +1051,10 @@ export default function App() {
                     <p className="candidate-total">
                       集計対象表記 {person.aliases.filter((alias) => alias.status === "accepted").length} 件 / 重複除外後{" "}
                       {person.accepted_mention_comment_count} 件
+                    </p>
+                    <p className="confidence-line">
+                      <span>{entityTypeLabel(person.entity_type)}</span>
+                      <span>{confidenceLabel("candidate", person.confidence)}</span>
                     </p>
                   </div>
                   <span className={`status status-${person.status}`}>{statusLabel(person.status)}</span>
@@ -1051,6 +1084,11 @@ export default function App() {
                   >
                     {updatingId === person.person_id ? "処理中" : person.status === "rejected" ? "除外済み" : "除外"}
                   </button>
+                  {person.reason === "別の人物候補に統合済み" ? (
+                    <button type="button" disabled={busy} onClick={() => splitMergedPerson(person)}>
+                      統合解除
+                    </button>
+                  ) : null}
                 </div>
                 <div className="alias-editor" aria-label={`${person.display_name} の表示名と表記編集`}>
                   <label>
@@ -1123,6 +1161,7 @@ export default function App() {
                         <small>{aliasSourceLabel(alias.source)}</small>
                       </span>
                       <span>表記別 {alias.mention_comment_count}件</span>
+                      <span>{confidenceLabel("alias", alias.confidence)}</span>
                       <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
                       <button
                         className={alias.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
@@ -1148,6 +1187,18 @@ export default function App() {
                       >
                         {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "外し済み" : "集計から外す"}
                       </button>
+                      <button
+                        className="choice-button choice-button--danger"
+                        disabled={busy}
+                        onClick={() =>
+                          updateCandidate(
+                            { type: "delete_alias", alias_id: alias.alias_id },
+                            `表記「${alias.alias_text}」を削除しました`
+                          )
+                        }
+                      >
+                        削除
+                      </button>
                       {alias.representative_comments.length ? (
                         <details className="alias-evidence">
                           <summary>代表コメント</summary>
@@ -1164,6 +1215,7 @@ export default function App() {
                 </ul>
               </article>
             ))}
+            {!visibleCandidatePersons.length ? <p className="empty-note">この表示範囲に該当する候補はありません。</p> : null}
           </div>
         </section>
       ) : null}
@@ -1876,6 +1928,23 @@ function statusLabel(status: string): string {
   if (status === "pending") return "保留";
   if (status === "candidate") return "候補";
   return status;
+}
+
+function isPrimaryEntityType(entityType: string): boolean {
+  return ["person", "group", "duo"].includes(entityType);
+}
+
+function entityTypeLabel(entityType: string): string {
+  if (entityType === "person") return "人物候補";
+  if (entityType === "group") return "グループ候補";
+  if (entityType === "duo") return "コンビ候補";
+  if (entityType === "channel") return "チャンネル候補";
+  return `${entityType} 候補`;
+}
+
+function confidenceLabel(kind: "candidate" | "alias" | "classification", value: number): string {
+  const label = kind === "candidate" ? "候補信頼度" : kind === "alias" ? "alias信頼度" : "分類信頼度";
+  return `${label} ${Math.round(value * 100)}%`;
 }
 
 function normalizeSearch(value: string): string {
