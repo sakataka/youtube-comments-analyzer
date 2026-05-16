@@ -86,7 +86,11 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)
             self.assertEqual(report["schema_version"], "report.v1")
-            self.assertEqual(report["sections"]["appeal_summary"]["status"], "skipped")
+            self.assertEqual(report["sections"]["appeal_summary"]["status"], "available")
+            self.assertGreater(len(report["appeal_summary"]["people"]), 0)
+            self.assertIn("category_counts", report["appeal_summary"]["people"][0])
+            self.assertIn("tone_counts", report["appeal_summary"]["people"][0])
+            self.assertIn("evidence_comments", report["appeal_summary"]["people"][0])
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)

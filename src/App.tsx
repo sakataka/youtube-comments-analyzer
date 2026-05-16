@@ -138,6 +138,27 @@ type LlmAssist = {
   notes: string[];
 };
 
+type AppealPersonSummary = {
+  person_id: string;
+  display_name: string;
+  comment_count: number;
+  category_counts: Array<{
+    category: string;
+    label: string;
+    count: number;
+    representative_comment_ids: string[];
+  }>;
+  tone_counts: Record<"positive" | "neutral" | "mixed" | "negative" | "unclear", number>;
+  dominant_tone: string;
+  summary: string;
+  evidence_comments: Array<{
+    comment_id: string;
+    text_original: string;
+    like_count: number;
+  }>;
+  negative_note?: string | null;
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -166,6 +187,9 @@ type Report = {
   persons: Person[];
   alias_suggestions: AliasSuggestion[];
   llm_assist?: LlmAssist | null;
+  appeal_summary: {
+    people: AppealPersonSummary[];
+  };
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -282,12 +306,14 @@ export default function App() {
   const selectedPersonDetails = useMemo(() => {
     if (!report || !selectedDetailPerson) return null;
     const person = report.persons.find((item) => item.person_id === selectedDetailPerson.person_id);
+    const appeal = report.appeal_summary.people.find((item) => item.person_id === selectedDetailPerson.person_id);
     const comments = report.comments
       .filter((comment) => comment.mentioned_persons.some((mentioned) => mentioned.person_id === selectedDetailPerson.person_id))
       .sort((a, b) => b.like_count - a.like_count);
     const aliases = person?.aliases.filter((alias) => alias.status === "accepted") ?? [];
     return {
       person,
+      appeal,
       comments,
       aliases,
       featureWords: extractFeatureWords(
@@ -1280,6 +1306,45 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              {selectedPersonDetails.appeal ? (
+                <div className="detail-block appeal-block">
+                  <h4>魅力分析</h4>
+                  <p>{selectedPersonDetails.appeal.summary}</p>
+                  <div className="appeal-grid">
+                    <div>
+                      <strong>カテゴリ</strong>
+                      {selectedPersonDetails.appeal.category_counts.slice(0, 6).map((category) => (
+                        <div className="appeal-meter" key={category.category}>
+                          <span>{category.label}</span>
+                          <meter min={0} max={Math.max(selectedPersonDetails.appeal?.comment_count ?? 1, 1)} value={category.count} />
+                          <em>{category.count}</em>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <strong>tone</strong>
+                      <div className="tone-grid">
+                        {Object.entries(selectedPersonDetails.appeal.tone_counts).map(([tone, count]) => (
+                          <span key={tone}>
+                            {toneLabel(tone)} <b>{count}</b>
+                          </span>
+                        ))}
+                      </div>
+                      {selectedPersonDetails.appeal.negative_note ? <small>{selectedPersonDetails.appeal.negative_note}</small> : null}
+                    </div>
+                  </div>
+                  <div className="comment-list">
+                    {selectedPersonDetails.appeal.evidence_comments.slice(0, 3).map((comment) => (
+                      <article className="comment-row" key={comment.comment_id}>
+                        <div className="comment-row__meta">
+                          <strong>{comment.like_count} likes</strong>
+                        </div>
+                        <p>{comment.text_original}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="detail-block">
                 <h4>特徴語</h4>
                 <div className="feature-list">
@@ -1560,6 +1625,15 @@ function coverageLabel(status: string): string {
   if (status === "limited_by_api_or_availability") return "取得不足の可能性";
   if (status === "unknown") return "不明";
   return status;
+}
+
+function toneLabel(tone: string): string {
+  if (tone === "positive") return "positive";
+  if (tone === "neutral") return "neutral";
+  if (tone === "mixed") return "mixed";
+  if (tone === "negative") return "negative";
+  if (tone === "unclear") return "unclear";
+  return tone;
 }
 
 function aliasSourceLabel(source: string): string {

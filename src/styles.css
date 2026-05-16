@@ -904,6 +904,71 @@ h4 {
   gap: 10px;
 }
 
+.appeal-block {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.appeal-block p,
+.appeal-block small {
+  color: #647181;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.appeal-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr);
+}
+
+.appeal-grid > div {
+  background: #fff;
+  border: 1px solid #e1e8f1;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.appeal-meter {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 86px minmax(0, 1fr) 34px;
+}
+
+.appeal-meter span,
+.appeal-meter em {
+  color: #435264;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.appeal-meter meter {
+  height: 10px;
+  width: 100%;
+}
+
+.tone-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tone-grid span {
+  background: #eef3f8;
+  border: 1px solid #dce5ef;
+  border-radius: 999px;
+  color: #394858;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+
 .detail-pills {
   justify-content: flex-start;
 }
@@ -1073,6 +1138,7 @@ blockquote {
   .dashboard-charts,
   .llm-assist-grid,
   .frequent-review-board,
+  .appeal-grid,
   .report-layout,
   .detail-layout,
   .comment-toolbar,

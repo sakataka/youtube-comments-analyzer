@@ -5,6 +5,21 @@ from collections import defaultdict
 from typing import Any
 
 
+APPEAL_CATEGORIES = [
+    ("funny", "面白さ", ["面白", "おもしろ", "笑", "草", "爆笑", "最高", "ツッコミ", "ボケ"]),
+    ("kindness", "優しさ", ["優し", "助け", "フォロー", "気遣", "尊敬", "素敵", "いい人"]),
+    ("talk_skill", "トーク力", ["トーク", "返し", "コメント", "回し", "平場", "エピソード", "切り返"]),
+    ("visual", "ビジュアル", ["可愛", "かわい", "綺麗", "きれい", "美人", "ビジュ", "顔"]),
+    ("effort", "頑張り", ["頑張", "がんば", "努力", "成長", "一生懸命", "本気"]),
+    ("reaction", "リアクション", ["リアクション", "反応", "泣", "笑顔", "表情", "空気"]),
+]
+
+TONE_KEYWORDS = {
+    "positive": ["好き", "最高", "良い", "いい", "素敵", "尊敬", "面白", "かわい", "可愛", "綺麗", "すご", "推し"],
+    "negative": ["嫌い", "苦手", "つまら", "無理", "怖い", "ひどい", "炎上", "嫌"],
+}
+
+
 def like_count_distribution(comments: list[Any]) -> list[dict[str, int | str]]:
     buckets = [
         ("0", 0, 0),
@@ -84,6 +99,108 @@ def build_mention_ranking(mentions: list[Any], total_comments: int) -> tuple[lis
     return ranking, mentions_by_comment
 
 
+def build_appeal_summary(mentions: list[Any]) -> dict[str, Any]:
+    by_person: dict[str, dict[str, Any]] = {}
+    for mention in mentions:
+        person_id = mention["person_id"]
+        person = by_person.setdefault(
+            person_id,
+            {
+                "person_id": person_id,
+                "display_name": mention["display_name"],
+                "comments_by_id": {},
+            },
+        )
+        person["comments_by_id"].setdefault(
+            mention["comment_id"],
+            {
+                "comment_id": mention["comment_id"],
+                "text_original": mention["text_original"],
+                "like_count": int(mention["like_count"]),
+            },
+        )
+
+    people = []
+    for person in by_person.values():
+        comments = list(person["comments_by_id"].values())
+        category_counts = appeal_category_counts(comments)
+        tone_counts = tone_count_summary(comments)
+        dominant_categories = [category for category in category_counts if category["count"] > 0][:3]
+        evidence_comments = sorted(comments, key=lambda comment: int(comment["like_count"]), reverse=True)[:4]
+        negative_count = tone_counts["negative"]
+        people.append({
+            "person_id": person["person_id"],
+            "display_name": person["display_name"],
+            "comment_count": len(comments),
+            "category_counts": category_counts,
+            "tone_counts": tone_counts,
+            "dominant_tone": dominant_tone(tone_counts),
+            "summary": appeal_summary_text(person["display_name"], dominant_categories, tone_counts),
+            "evidence_comments": evidence_comments,
+            "negative_note": negative_note_text(negative_count, len(comments)),
+        })
+    people.sort(key=lambda person: person["comment_count"], reverse=True)
+    return {"people": people}
+
+
+def appeal_category_counts(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for category_id, label, keywords in APPEAL_CATEGORIES:
+        matched_comments = [
+            comment
+            for comment in comments
+            if any(keyword in comment["text_original"] for keyword in keywords)
+        ]
+        rows.append({
+            "category": category_id,
+            "label": label,
+            "count": len(matched_comments),
+            "representative_comment_ids": [comment["comment_id"] for comment in matched_comments[:3]],
+        })
+    rows.sort(key=lambda row: row["count"], reverse=True)
+    return rows
+
+
+def tone_count_summary(comments: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"positive": 0, "neutral": 0, "mixed": 0, "negative": 0, "unclear": 0}
+    for comment in comments:
+        text = comment["text_original"]
+        positive = any(keyword in text for keyword in TONE_KEYWORDS["positive"])
+        negative = any(keyword in text for keyword in TONE_KEYWORDS["negative"])
+        if positive and negative:
+            counts["mixed"] += 1
+        elif positive:
+            counts["positive"] += 1
+        elif negative:
+            counts["negative"] += 1
+        elif len(text.strip()) < 8:
+            counts["unclear"] += 1
+        else:
+            counts["neutral"] += 1
+    return counts
+
+
+def dominant_tone(tone_counts: dict[str, int]) -> str:
+    priority = {"positive": 4, "mixed": 3, "neutral": 2, "negative": 1, "unclear": 0}
+    return max(tone_counts.items(), key=lambda item: (item[1], priority[item[0]]))[0]
+
+
+def appeal_summary_text(display_name: str, dominant_categories: list[dict[str, Any]], tone_counts: dict[str, int]) -> str:
+    if dominant_categories:
+        category_text = "、".join(category["label"] for category in dominant_categories)
+        return f"{display_name} は {category_text} への言及が目立ちます。tone は {dominant_tone(tone_counts)} が中心です。"
+    return f"{display_name} は明確な魅力カテゴリがまだ少ないため、根拠コメントの追加確認が必要です。"
+
+
+def negative_note_text(negative_count: int, total_count: int) -> str | None:
+    if negative_count < 3:
+        return None
+    rate = negative_count / max(total_count, 1)
+    if rate < 0.08:
+        return None
+    return f"negative 判定が {negative_count} 件あります。過度に強調せず、代表コメントで文脈確認してください。"
+
+
 def build_report_payload(
     run_id: str,
     video: Any,
@@ -96,6 +213,7 @@ def build_report_payload(
     llm_assist: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
+    appeal_summary = build_appeal_summary(mentions)
     llm_section = llm_section_status(llm_assist)
     return {
         "schema_version": "report.v1",
@@ -128,6 +246,7 @@ def build_report_payload(
         "persons": persons,
         "alias_suggestions": alias_suggestions,
         "llm_assist": llm_assist,
+        "appeal_summary": appeal_summary,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -149,7 +268,7 @@ def build_report_payload(
             "alias_suggestions": {"status": "available"},
             "raw_comments": {"status": "available"},
             "llm_assist": llm_section,
-            "appeal_summary": {"status": "skipped", "reason": "MVP-1 later scope"},
+            "appeal_summary": {"status": "available"},
             "ambiguous_classification": (
                 llm_section
                 if llm_section["status"] == "failed"
