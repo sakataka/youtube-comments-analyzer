@@ -86,7 +86,7 @@ URL 入力
 - cache 保存方針
 - デモ手順
 
-## 一部完了
+## 状況詳細
 
 ### 動画・取得概要
 
@@ -105,13 +105,14 @@ URL 入力
 - cache 使用時の API 再消費なし表示
 - 取得不足の UI 表示
 - 取得エラーの API response 整理
-
-未完了:
-
 - live metadata の UI 表示強化
 - YouTube 上の comment count availability
 - いいね数分布
 - API で全件取得できない場合の詳細表示強化
+
+未完了:
+
+- なし
 
 ### 人物候補と alias
 
@@ -131,7 +132,7 @@ URL 入力
 - 表記ゆれ統合 UI
 - merge 操作
 
-未完了:
+後続改善:
 
 - `person`, `group`, `duo` 以外の折りたたみ表示
 
@@ -146,7 +147,7 @@ URL 入力
 - 取得エラーの UI 表示
 - 取得済みコメント一覧表示
 
-未完了:
+後続フェーズへ移動:
 
 - `reply_fetch_mode=inline_subset`
 - `reply_fetch_mode=full`
@@ -170,7 +171,7 @@ URL 入力
 - コメント単位の人物紐づけ追加・解除
 - 手動紐づけ修正後のランキング再生成
 
-未完了:
+後続フェーズへ移動:
 
 - 概要ダッシュボード
 - 過去分析一覧画面
@@ -178,6 +179,33 @@ URL 入力
 - グラフ表示
 
 ## 未実装
+
+### Phase 5: MVP-0 追加改善
+
+MVP-0 の必須 vertical slice は完了済み。次に残す場合は、分析精度や運用性を上げる追加改善として扱う。
+
+- `person`, `group`, `duo` 以外の entity type を折りたたむ表示
+- LLM なしの初期検証動画での alias 誤爆確認
+- confidence 表示の整理
+- 上位コメントの人間確認 workflow
+
+### Phase 6: 返信・再取得
+
+YouTube API quota 消費が増えるため、cache と取得概要 UI が安定してから扱う。
+
+- `reply_fetch_mode=inline_subset`
+- `reply_fetch_mode=full`
+- `comments.list` による返信 full 取得
+- 差分更新
+
+### Phase 7: レポート UI 拡張
+
+分析結果を見やすくする拡張であり、MVP-0 の分類・集計成立条件ではない。
+
+- 概要ダッシュボード
+- 過去分析一覧画面
+- 設定画面
+- グラフ表示
 
 ### MVP-1: LLM あり分析
 
@@ -214,7 +242,6 @@ URL 入力
 - 日本語形態素解析
 - 固有表現抽出モデル
 - alias 誤爆抑制の高度化
-- 人物候補 merge
 - グループ、番組名、企画名、ファン名の扱い強化
 - 上位 50 コメントの人間確認 workflow
 - confidence の UI 表示整理
@@ -230,10 +257,11 @@ URL 入力
 
 優先順位は次の順です。
 
-1. `person`, `group`, `duo` 以外の折りたたみ表示を検討する。
-2. live metadata の UI 表示と YouTube 上の comment count availability を追加する。
-3. LLM なしの MVP-0 を初期検証動画で人間確認し、alias 誤爆を修正する。
-4. その後に MVP-1 の LLM 候補整理と曖昧コメント分類へ進む。
+1. LLM なしの MVP-0 を初期検証動画で人間確認し、alias 誤爆を修正する。
+2. `person`, `group`, `duo` 以外の折りたたみ表示を必要性ベースで検討する。
+3. 返信取得が必要な動画でだけ `reply_fetch_mode=inline_subset` を追加する。
+4. その後に MVP-1 の未知 alias / ニックネーム候補サジェストへ進む。
+5. MVP-1 の LLM 候補整理、曖昧コメント分類、人物別要約へ進む。
 
 ## 完了判定
 
@@ -242,6 +270,6 @@ MVP-0 は要求仕様書上の vertical slice と usable review flow を満た�
 - 主要人物候補の自動抽出精度
 - ユーザーが 1 分以内に候補確認を終えられる UI
 - entity_type ごとの折りたたみ
-- live metadata の詳細表示
+- 未知 alias / ニックネーム候補のサジェスト
 
 そのため、現状は `MVP-0 usable review flow complete`、次の目標は `MVP-1 LLM-assisted analysis` とします。

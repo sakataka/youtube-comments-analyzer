@@ -6,6 +6,7 @@ type RunState = {
   stage: string;
   progress: number;
   error_message?: string | null;
+  video?: VideoSummary;
   fetch_summary?: {
     source: string;
     max_comments_requested: number;
@@ -13,7 +14,34 @@ type RunState = {
     fetch_order: string;
     reply_fetch_mode: string;
     fetched_at: string;
+    coverage: FetchCoverage;
   };
+};
+
+type VideoSummary = {
+  youtube_video_id: string;
+  url: string;
+  title: string;
+  channel_title: string;
+  published_at?: string | null;
+  youtube_comment_count?: number | null;
+  comment_count_available: boolean;
+  youtube_view_count?: number | null;
+  youtube_like_count?: number | null;
+};
+
+type FetchCoverage = {
+  status: string;
+  message: string;
+  youtube_comment_count?: number | null;
+  comment_count_available: boolean;
+  fetched_comment_count: number;
+  max_comments_requested: number;
+};
+
+type LikeDistributionBucket = {
+  label: string;
+  count: number;
 };
 
 type Alias = {
@@ -71,16 +99,19 @@ type Report = {
     url: string;
     title: string;
     channel_title: string;
-  };
+  } & VideoSummary;
   fetch_summary: {
     source: string;
     fetched_at: string;
     fetched_top_level_count: number;
     fetched_reply_count: number;
+    max_comments_fetched: number;
     total_like_count: number;
+    like_count_distribution: LikeDistributionBucket[];
     max_comments_requested: number;
     fetch_order: string;
     reply_fetch_mode: string;
+    coverage: FetchCoverage;
   };
   rankings: {
     mention_ranking: RankingRow[];
@@ -350,6 +381,16 @@ export default function App() {
 
       {run ? (
         <section className="panel status-panel">
+          {run.video ? (
+            <div className="status-panel__wide">
+              <span className="label">Video</span>
+              <strong>{run.video.title || run.video.youtube_video_id}</strong>
+              <small>
+                {run.video.channel_title || "チャンネル未取得"} / YouTube表示コメント数:{" "}
+                {formatNullableNumber(run.video.youtube_comment_count)}
+              </small>
+            </div>
+          ) : null}
           <div>
             <span className="label">Run</span>
             <strong>{run.run_id}</strong>
@@ -380,11 +421,21 @@ export default function App() {
               </small>
             </div>
           ) : null}
+          {run.fetch_summary ? (
+            <div>
+              <span className="label">Coverage</span>
+              <strong>{coverageLabel(run.fetch_summary.coverage.status)}</strong>
+              <small>{run.fetch_summary.coverage.message}</small>
+            </div>
+          ) : null}
           <progress value={run.progress} max={1} />
-          {run.fetch_summary && run.fetch_summary.max_comments_fetched < run.fetch_summary.max_comments_requested ? (
+          {run.fetch_summary && run.fetch_summary.coverage.status !== "complete_or_near_complete" ? (
             <div className="status-warning">
-              要求 {run.fetch_summary.max_comments_requested} 件に対し、取得できたコメントは {run.fetch_summary.max_comments_fetched} 件です。
-              YouTube API 側の取得可能範囲または実コメント数による差分です。
+              要求 {run.fetch_summary.max_comments_requested} 件 / 取得 {run.fetch_summary.max_comments_fetched} 件
+              {run.fetch_summary.coverage.comment_count_available
+                ? ` / YouTube表示 ${formatNullableNumber(run.fetch_summary.coverage.youtube_comment_count)} 件`
+                : " / YouTube表示コメント数は未取得"}
+              。{run.fetch_summary.coverage.message}
             </div>
           ) : null}
         </section>
@@ -570,9 +621,48 @@ export default function App() {
             <div>
               <h2>言及ランキング</h2>
               <p>
-                データソース: {report.fetch_summary.source} / 取得コメント:
-                {report.fetch_summary.fetched_top_level_count}
+                データソース: {sourceLabel(report.fetch_summary.source)} / 取得コメント:
+                {report.fetch_summary.fetched_top_level_count} / YouTube表示:
+                {formatNullableNumber(report.video.youtube_comment_count)}
               </p>
+            </div>
+          </div>
+          <div className="report-summary-grid">
+            <div>
+              <span className="label">動画</span>
+              <strong>{report.video.title || report.video.youtube_video_id}</strong>
+              <small>{report.video.channel_title || "チャンネル未取得"}</small>
+            </div>
+            <div>
+              <span className="label">取得範囲</span>
+              <strong>{coverageLabel(report.fetch_summary.coverage.status)}</strong>
+              <small>{report.fetch_summary.coverage.message}</small>
+            </div>
+            <div>
+              <span className="label">コメント数</span>
+              <strong>
+                {report.fetch_summary.max_comments_fetched} / {report.fetch_summary.max_comments_requested}
+              </strong>
+              <small>YouTube表示 {formatNullableNumber(report.video.youtube_comment_count)}</small>
+            </div>
+          </div>
+          <div className="like-distribution" aria-label="いいね数分布">
+            <div className="like-distribution__header">
+              <strong>いいね数分布</strong>
+              <small>取得済みコメント内</small>
+            </div>
+            <div className="like-distribution__bars">
+              {report.fetch_summary.like_count_distribution.map((bucket) => (
+                <div key={bucket.label}>
+                  <span>{bucket.label}</span>
+                  <meter
+                    min={0}
+                    max={Math.max(...report.fetch_summary.like_count_distribution.map((item) => item.count), 1)}
+                    value={bucket.count}
+                  />
+                  <strong>{bucket.count}</strong>
+                </div>
+              ))}
             </div>
           </div>
           <div className="report-layout">
@@ -798,6 +888,18 @@ function sourceNote(source: string): string {
   if (source === "youtube_api") return "今回YouTube APIから取得。次回同条件はcache使用。";
   if (source === "fixture") return "API keyなしの検証データ。";
   return "";
+}
+
+function formatNullableNumber(value?: number | null): string {
+  return typeof value === "number" ? value.toLocaleString("ja-JP") : "未取得";
+}
+
+function coverageLabel(status: string): string {
+  if (status === "complete_or_near_complete") return "概ね取得済み";
+  if (status === "limited_by_request") return "要求上限まで取得";
+  if (status === "limited_by_api_or_availability") return "取得不足の可能性";
+  if (status === "unknown") return "不明";
+  return status;
 }
 
 function aliasSourceLabel(source: string): string {

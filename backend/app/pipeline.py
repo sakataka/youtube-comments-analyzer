@@ -79,6 +79,52 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def like_count_distribution(comments: list[sqlite3.Row]) -> list[dict[str, int | str]]:
+    buckets = [
+        ("0", 0, 0),
+        ("1-4", 1, 4),
+        ("5-9", 5, 9),
+        ("10-49", 10, 49),
+        ("50+", 50, None),
+    ]
+    output: list[dict[str, int | str]] = []
+    for label, lower, upper in buckets:
+        count = sum(
+            1
+            for comment in comments
+            if int(comment["like_count"]) >= lower and (upper is None or int(comment["like_count"]) <= upper)
+        )
+        output.append({"label": label, "count": count})
+    return output
+
+
+def fetch_coverage_summary(video: sqlite3.Row, snapshot: sqlite3.Row) -> dict[str, Any]:
+    youtube_count = video["youtube_comment_count"]
+    fetched_count = int(snapshot["max_comments_fetched"])
+    requested_count = int(snapshot["max_comments_requested"])
+    available = bool(video["comment_count_available"])
+    if not available or youtube_count is None:
+        status = "unknown"
+        message = "YouTube 側のコメント総数は未取得です。古い cache または fixture では未表示になります。"
+    elif fetched_count >= int(youtube_count):
+        status = "complete_or_near_complete"
+        message = "YouTube 表示コメント数に対して、今回取得分は概ね到達しています。"
+    elif fetched_count >= requested_count:
+        status = "limited_by_request"
+        message = "YouTube 表示コメント数より少ないですが、今回の最大取得件数に到達しています。"
+    else:
+        status = "limited_by_api_or_availability"
+        message = "YouTube 表示コメント数より取得件数が少ないため、API の取得可能範囲や公開状態の影響がありえます。"
+    return {
+        "status": status,
+        "message": message,
+        "youtube_comment_count": youtube_count,
+        "comment_count_available": available,
+        "fetched_comment_count": fetched_count,
+        "max_comments_requested": requested_count,
+    }
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -90,6 +136,10 @@ def init_db(conn: sqlite3.Connection) -> None:
           channel_title text not null,
           description text,
           published_at text,
+          youtube_comment_count integer,
+          comment_count_available integer not null default 0,
+          youtube_view_count integer,
+          youtube_like_count integer,
           fetched_at text not null
         );
         create table if not exists comment_snapshots (
@@ -195,7 +245,17 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    ensure_column(conn, "videos", "youtube_comment_count", "integer")
+    ensure_column(conn, "videos", "comment_count_available", "integer not null default 0")
+    ensure_column(conn, "videos", "youtube_view_count", "integer")
+    ensure_column(conn, "videos", "youtube_like_count", "integer")
     conn.commit()
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row[1] for row in conn.execute(f"pragma table_info({table})")}
+    if column not in columns:
+        conn.execute(f"alter table {table} add column {column} {definition}")
 
 
 class AnalysisStore:
@@ -214,7 +274,22 @@ class AnalysisStore:
         video = bundle["video"]
         fetch = bundle["fetch_summary"]
         self.conn.execute(
-            "insert into videos values (?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            insert into videos (
+              id,
+              youtube_video_id,
+              url,
+              title,
+              channel_title,
+              description,
+              published_at,
+              youtube_comment_count,
+              comment_count_available,
+              youtube_view_count,
+              youtube_like_count,
+              fetched_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 video_id,
                 video["youtube_video_id"],
@@ -223,6 +298,10 @@ class AnalysisStore:
                 video["channel_title"],
                 video.get("description"),
                 video.get("published_at"),
+                video.get("youtube_comment_count"),
+                1 if video.get("comment_count_available") else 0,
+                video.get("youtube_view_count"),
+                video.get("youtube_like_count"),
                 now,
             ),
         )
@@ -712,16 +791,24 @@ class AnalysisStore:
                 "url": video["url"],
                 "title": video["title"],
                 "channel_title": video["channel_title"],
+                "published_at": video["published_at"],
+                "youtube_comment_count": video["youtube_comment_count"],
+                "comment_count_available": bool(video["comment_count_available"]),
+                "youtube_view_count": video["youtube_view_count"],
+                "youtube_like_count": video["youtube_like_count"],
             },
             "fetch_summary": {
                 "source": snapshot["source"],
                 "fetched_at": snapshot["fetched_at"],
                 "fetched_top_level_count": snapshot["fetched_top_level_count"],
                 "fetched_reply_count": snapshot["fetched_reply_count"],
+                "max_comments_fetched": snapshot["max_comments_fetched"],
                 "total_like_count": sum(int(comment["like_count"]) for comment in comments),
+                "like_count_distribution": like_count_distribution(comments),
                 "max_comments_requested": snapshot["max_comments_requested"],
                 "fetch_order": snapshot["fetch_order"],
                 "reply_fetch_mode": snapshot["reply_fetch_mode"],
+                "coverage": fetch_coverage_summary(video, snapshot),
             },
             "analysis_config": json.loads(run["config_json"]),
             "persons": self.get_candidates(run_id)["persons"],
@@ -809,12 +896,23 @@ class AnalysisStore:
     def get_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         snapshot = self.conn.execute("select * from comment_snapshots where id = ?", (run["comment_snapshot_id"],)).fetchone()
+        video = self.conn.execute("select * from videos where id = ?", (run["video_id"],)).fetchone()
         return {
             "run_id": run["id"],
             "status": run["status"],
             "stage": run["stage"],
             "progress": run["progress"],
             "error_message": run["error_message"],
+            "video": {
+                "youtube_video_id": video["youtube_video_id"],
+                "url": video["url"],
+                "title": video["title"],
+                "channel_title": video["channel_title"],
+                "youtube_comment_count": video["youtube_comment_count"],
+                "comment_count_available": bool(video["comment_count_available"]),
+                "youtube_view_count": video["youtube_view_count"],
+                "youtube_like_count": video["youtube_like_count"],
+            },
             "fetch_summary": {
                 "source": snapshot["source"],
                 "max_comments_requested": snapshot["max_comments_requested"],
@@ -822,6 +920,7 @@ class AnalysisStore:
                 "fetch_order": snapshot["fetch_order"],
                 "reply_fetch_mode": snapshot["reply_fetch_mode"],
                 "fetched_at": snapshot["fetched_at"],
+                "coverage": fetch_coverage_summary(video, snapshot),
             },
         }
 

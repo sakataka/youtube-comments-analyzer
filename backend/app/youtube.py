@@ -37,6 +37,15 @@ def parse_youtube_video_id(url: str) -> str:
     return video_id
 
 
+def optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class FetchConfig:
     max_comments: int = 1000
@@ -75,6 +84,10 @@ class YouTubeCommentClient:
             "channel_title": "Fixture",
             "description": "YOUTUBE_API_KEY がない場合の deterministic seed data",
             "published_at": None,
+            "youtube_comment_count": None,
+            "comment_count_available": False,
+            "youtube_view_count": None,
+            "youtube_like_count": None,
         }
         return self._bundle(url, video_id, metadata, comments[: config.max_comments], "fixture")
 
@@ -120,13 +133,15 @@ class YouTubeCommentClient:
     def _fetch_video_metadata(self, api_key: str, url: str, video_id: str) -> dict[str, Any]:
         payload = self._get_json("https://www.googleapis.com/youtube/v3/videos", {
             "key": api_key,
-            "part": "snippet",
+            "part": "snippet,statistics",
             "id": video_id,
         })
         items = payload.get("items", [])
         if not items:
             raise RuntimeError("YouTube 動画メタデータを取得できませんでした")
         snippet = items[0]["snippet"]
+        statistics = items[0].get("statistics", {})
+        comment_count = optional_int(statistics.get("commentCount"))
         return {
             "youtube_video_id": video_id,
             "url": url,
@@ -134,6 +149,10 @@ class YouTubeCommentClient:
             "channel_title": snippet.get("channelTitle") or "",
             "description": snippet.get("description") or "",
             "published_at": snippet.get("publishedAt"),
+            "youtube_comment_count": comment_count,
+            "comment_count_available": comment_count is not None,
+            "youtube_view_count": optional_int(statistics.get("viewCount")),
+            "youtube_like_count": optional_int(statistics.get("likeCount")),
         }
 
     def _get_json(self, endpoint: str, query: dict[str, Any]) -> dict[str, Any]:
@@ -161,6 +180,10 @@ class YouTubeCommentClient:
             "channel_title": metadata.get("channel_title") or "",
             "description": metadata.get("description") or "",
             "published_at": metadata.get("published_at"),
+            "youtube_comment_count": metadata.get("youtube_comment_count"),
+            "comment_count_available": bool(metadata.get("comment_count_available")),
+            "youtube_view_count": metadata.get("youtube_view_count"),
+            "youtube_like_count": metadata.get("youtube_like_count"),
         }
         return {
             "video": video,

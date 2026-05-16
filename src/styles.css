@@ -112,7 +112,11 @@ select {
   align-items: center;
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) 180px;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) 180px;
+}
+
+.status-panel__wide {
+  grid-column: 1 / -1;
 }
 
 .status-panel small {
@@ -387,6 +391,66 @@ h4 {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.report-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 16px;
+}
+
+.report-summary-grid > div,
+.like-distribution {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.report-summary-grid strong {
+  display: block;
+}
+
+.report-summary-grid small {
+  color: #697789;
+  display: block;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.like-distribution {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.like-distribution__header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+}
+
+.like-distribution__header small {
+  color: #697789;
+  font-weight: 700;
+}
+
+.like-distribution__bars {
+  display: grid;
+  gap: 8px;
+}
+
+.like-distribution__bars div {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 48px minmax(0, 1fr) 42px;
+}
+
+.like-distribution meter {
+  height: 12px;
+  width: 100%;
 }
 
 .detail-layout {
