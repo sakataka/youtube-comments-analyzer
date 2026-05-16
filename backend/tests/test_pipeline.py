@@ -68,6 +68,8 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(report["schema_version"], "report.v1")
             self.assertEqual(report["sections"]["appeal_summary"]["status"], "skipped")
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
+            mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
+            self.assertGreater(len(mentioned_comments), 0)
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
 
 

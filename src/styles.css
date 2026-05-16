@@ -17,7 +17,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -94,7 +95,8 @@ label {
   gap: 7px;
 }
 
-input {
+input,
+select {
   border: 1px solid #cfd8e4;
   border-radius: 8px;
   min-height: 42px;
@@ -379,10 +381,72 @@ blockquote {
   color: #697789;
 }
 
+.comment-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  margin-bottom: 16px;
+}
+
+.comment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.comment-row {
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.comment-row p {
+  color: #2c3948;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.comment-row__meta {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.mention-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.mention-pills span {
+  background: #e8f1ff;
+  border: 1px solid #bfd6ff;
+  border-radius: 999px;
+  color: #154c9f;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.mention-pills .mention-pills__empty {
+  background: #f1f4f8;
+  border-color: #d7dfe9;
+  color: #5d6b7b;
+}
+
+.list-note {
+  color: #697789;
+  margin: 12px 0 0;
+}
+
 @media (max-width: 760px) {
   .hero,
   .status-panel,
-  .report-layout {
+  .report-layout,
+  .comment-toolbar {
     grid-template-columns: 1fr;
   }
 

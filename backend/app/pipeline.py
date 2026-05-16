@@ -572,9 +572,11 @@ class AnalysisStore:
         ).fetchall()
         by_person: dict[str, list[sqlite3.Row]] = defaultdict(list)
         names: dict[str, str] = {}
+        mentions_by_comment: dict[str, dict[str, str]] = defaultdict(dict)
         for mention in mentions:
             by_person[mention["person_id"]].append(mention)
             names[mention["person_id"]] = mention["display_name"]
+            mentions_by_comment[mention["comment_id"]][mention["person_id"]] = mention["display_name"]
         ranking = []
         total_comments = max(1, len(comments))
         for person_id, rows in by_person.items():
@@ -623,6 +625,10 @@ class AnalysisStore:
                     "comment_id": comment["id"],
                     "text_original": comment["text_original"],
                     "like_count": comment["like_count"],
+                    "mentioned_persons": [
+                        {"person_id": person_id, "display_name": display_name}
+                        for person_id, display_name in sorted(mentions_by_comment[comment["id"]].items(), key=lambda item: item[1])
+                    ],
                 }
                 for comment in comments
             ],

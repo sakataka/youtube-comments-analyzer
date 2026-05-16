@@ -75,6 +75,10 @@ type Report = {
     comment_id: string;
     text_original: string;
     like_count: number;
+    mentioned_persons: Array<{
+      person_id: string;
+      display_name: string;
+    }>;
   }>;
 };
 
@@ -102,6 +106,8 @@ export default function App() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const [commentSearch, setCommentSearch] = useState("");
+  const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,6 +120,23 @@ export default function App() {
       total: persons.length
     };
   }, [candidates]);
+
+  const commentPersonOptions = useMemo(() => {
+    return report?.rankings.mention_ranking.map((row) => ({ person_id: row.person_id, display_name: row.display_name })) ?? [];
+  }, [report]);
+
+  const filteredComments = useMemo(() => {
+    const query = normalizeSearch(commentSearch);
+    const comments = report?.comments ?? [];
+    return comments.filter((comment) => {
+      const matchesText = !query || normalizeSearch(comment.text_original).includes(query);
+      const matchesPerson =
+        commentPersonFilter === "all" ||
+        (commentPersonFilter === "unassigned" && comment.mentioned_persons.length === 0) ||
+        comment.mentioned_persons.some((person) => person.person_id === commentPersonFilter);
+      return matchesText && matchesPerson;
+    });
+  }, [commentPersonFilter, commentSearch, report]);
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
@@ -435,6 +458,58 @@ export default function App() {
           </div>
         </section>
       ) : null}
+
+      {report ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>コメント一覧</h2>
+              <p>コメント本文と紐づいた人物を確認します。検索と人物フィルタで根拠を絞り込めます。</p>
+            </div>
+            <strong>{filteredComments.length} / {report.comments.length} 件</strong>
+          </div>
+          <div className="comment-toolbar">
+            <label>
+              検索
+              <input
+                placeholder="コメント本文で検索"
+                value={commentSearch}
+                onChange={(event) => setCommentSearch(event.target.value)}
+              />
+            </label>
+            <label>
+              人物
+              <select value={commentPersonFilter} onChange={(event) => setCommentPersonFilter(event.target.value)}>
+                <option value="all">すべて</option>
+                <option value="unassigned">未紐づけ</option>
+                {commentPersonOptions.map((person) => (
+                  <option key={person.person_id} value={person.person_id}>
+                    {person.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="comment-list">
+            {filteredComments.slice(0, 200).map((comment) => (
+              <article className="comment-row" key={comment.comment_id}>
+                <div className="comment-row__meta">
+                  <strong>{comment.like_count} likes</strong>
+                  <div className="mention-pills">
+                    {comment.mentioned_persons.length ? (
+                      comment.mentioned_persons.map((person) => <span key={person.person_id}>{person.display_name}</span>)
+                    ) : (
+                      <span className="mention-pills__empty">未紐づけ</span>
+                    )}
+                  </div>
+                </div>
+                <p>{comment.text_original}</p>
+              </article>
+            ))}
+          </div>
+          {filteredComments.length > 200 ? <p className="list-note">先頭 200 件を表示しています。検索条件を追加してください。</p> : null}
+        </section>
+      ) : null}
     </main>
   );
 }
@@ -445,4 +520,8 @@ function statusLabel(status: string): string {
   if (status === "pending") return "保留";
   if (status === "candidate") return "候補";
   return status;
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase();
 }
