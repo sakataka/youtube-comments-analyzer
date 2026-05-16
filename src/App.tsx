@@ -20,6 +20,7 @@ type Alias = {
   alias_id: string;
   alias_text: string;
   hit_count: number;
+  mention_comment_count: number;
   confidence: number;
   source: string;
   status: string;
@@ -384,7 +385,7 @@ export default function App() {
                     <h3>{person.display_name}</h3>
                     <p>{person.reason}</p>
                     <p className="candidate-total">
-                      集計対象表記 {person.aliases.filter((alias) => alias.status === "accepted").length} 件 / 集計コメント{" "}
+                      集計対象表記 {person.aliases.filter((alias) => alias.status === "accepted").length} 件 / 重複除外後{" "}
                       {person.accepted_mention_comment_count} 件
                     </p>
                   </div>
@@ -463,7 +464,7 @@ export default function App() {
                         {alias.alias_text}
                         <small>{aliasSourceLabel(alias.source)}</small>
                       </span>
-                      <span>{alias.hit_count}件</span>
+                      <span>表記別 {alias.mention_comment_count}件</span>
                       <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
                       <button
                         className={alias.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
@@ -586,10 +587,7 @@ export default function App() {
                 <h4>特徴語</h4>
                 <div className="feature-list">
                   {selectedPersonDetails.featureWords.map((word) => (
-                    <span key={word.term}>
-                      {word.term}
-                      <strong>{word.count}</strong>
-                    </span>
+                    <span key={word.term}>{word.term}</span>
                   ))}
                 </div>
               </div>
@@ -755,7 +753,7 @@ function extractFeatureWords(texts: string[], excludedTerms: string[]): Array<{ 
     const tokens = text.match(/[一-龥々ぁ-んァ-ヶーA-Za-z0-9]{2,16}/g) ?? [];
     for (const token of tokens) {
       const normalized = normalizeSearch(token);
-      if (excluded.has(normalized) || stopwords.has(normalized) || normalized.length < 2) continue;
+      if (excluded.has(normalized) || stopwords.has(normalized) || normalized.length < 2 || /\d/.test(normalized)) continue;
       counts.set(token, (counts.get(token) ?? 0) + 1);
     }
   }

@@ -739,6 +739,11 @@ class AnalysisStore:
                         "alias_text": alias["alias_text"],
                         "normalized_alias": alias["normalized_alias"],
                         "hit_count": alias["hit_count"],
+                        "mention_comment_count": sum(
+                            1
+                            for comment in comments
+                            if alias_matches(comment["text_normalized"], alias["normalized_alias"])
+                        ),
                         "confidence": alias["confidence"],
                         "source": alias["source"],
                         "status": alias["status"],

@@ -427,12 +427,6 @@ h4 {
   padding: 6px 10px;
 }
 
-.feature-list strong {
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 999px;
-  padding: 1px 6px;
-}
-
 .ranking-list {
   display: grid;
   gap: 12px;

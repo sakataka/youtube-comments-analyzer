@@ -58,6 +58,8 @@ class PipelineTest(unittest.TestCase):
             self.assertGreater(len(candidates["persons"]), 0)
             by_name = {person["display_name"]: person for person in candidates["persons"]}
             self.assertEqual(by_name["みりちゃむ"]["status"], "accepted")
+            mirichamu_alias = by_name["みりちゃむ"]["aliases"][0]
+            self.assertEqual(mirichamu_alias["mention_comment_count"], by_name["みりちゃむ"]["accepted_mention_comment_count"])
             saki_aliases = {alias["alias_text"] for alias in by_name["立野沙紀"]["aliases"]}
             self.assertIn("立野", saki_aliases)
             self.assertIn("沙紀", saki_aliases)
