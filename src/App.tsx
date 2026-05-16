@@ -109,6 +109,10 @@ type RankingRow = {
   display_name: string;
   mention_comment_count: number;
   mention_rate: number;
+  top_comment_mention_count: number;
+  single_mention_count: number;
+  multi_mention_count: number;
+  raw_like_sum: number;
   like_weighted_score: number;
   representative_comments: Array<{
     comment_id: string;
@@ -256,6 +260,11 @@ type Report = {
     fetch_order: string;
     reply_fetch_mode: string;
     coverage: FetchCoverage;
+  };
+  analysis_config: {
+    top_comment_definition?: string;
+    top_comment_count?: number;
+    like_weight_formula?: string;
   };
   rankings: {
     mention_ranking: RankingRow[];
@@ -1367,7 +1376,11 @@ export default function App() {
           <div className="section-heading section-heading--compact">
             <div>
               <h2>言及ランキング</h2>
-              <p>代表コメントと weighted score を確認します。</p>
+              <p>
+                上位コメントの定義: {topCommentDefinitionLabel(report.analysis_config.top_comment_definition)} / 上位{" "}
+                {report.analysis_config.top_comment_count ?? 50} 件。weighted score は{" "}
+                {report.analysis_config.like_weight_formula ?? "1 + log1p(like_count)"} です。
+              </p>
             </div>
           </div>
           <div className="report-layout">
@@ -1378,11 +1391,18 @@ export default function App() {
                   <div>
                     <h3>{row.display_name}</h3>
                     <p>
-                      {row.mention_comment_count}件 / {(row.mention_rate * 100).toFixed(1)}% / weighted{" "}
-                      {row.like_weighted_score.toFixed(2)}
+                      全体 {row.mention_comment_count}件 / 上位コメント内 {row.top_comment_mention_count}件 / 単独{" "}
+                      {row.single_mention_count}件 / 同時言及 {row.multi_mention_count}件
+                    </p>
+                    <p>
+                      raw likes {row.raw_like_sum.toLocaleString("ja-JP")} / weighted {row.like_weighted_score.toFixed(2)} /{" "}
+                      {(row.mention_rate * 100).toFixed(1)}%
                     </p>
                     {row.representative_comments.map((comment) => (
-                      <blockquote key={comment.comment_id}>{comment.text_original}</blockquote>
+                      <blockquote key={comment.comment_id}>
+                        {comment.text_original}
+                        <LikeCount count={comment.like_count} />
+                      </blockquote>
                     ))}
                   </div>
                 </article>
@@ -2110,6 +2130,11 @@ function coverageLabel(status: string): string {
   if (status === "limited_by_api_or_availability") return "取得不足の可能性";
   if (status === "unknown") return "不明";
   return status;
+}
+
+function topCommentDefinitionLabel(value?: string): string {
+  if (value === "like_count_desc") return "取得済みコメントをいいね数の多い順に並べた上位";
+  return value || "未設定";
 }
 
 function toneLabel(tone: string): string {

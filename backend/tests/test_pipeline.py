@@ -154,6 +154,12 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("low_confidence_comments", report["quality_review"])
             self.assertIn("human_review_items", report["quality_review"])
             self.assertGreater(len(report["rankings"]["mention_ranking"]), 0)
+            ranking_row = report["rankings"]["mention_ranking"][0]
+            self.assertIn("top_comment_mention_count", ranking_row)
+            self.assertIn("single_mention_count", ranking_row)
+            self.assertIn("multi_mention_count", ranking_row)
+            self.assertIn("raw_like_sum", ranking_row)
+            self.assertGreaterEqual(ranking_row["raw_like_sum"], 0)
             mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)
             target_comment = mentioned_comments[0]

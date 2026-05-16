@@ -80,7 +80,11 @@ def fetch_coverage_summary(video: Any, snapshot: Any) -> dict[str, Any]:
     }
 
 
-def build_mention_ranking(mentions: list[Any], total_comments: int) -> tuple[list[dict[str, Any]], dict[str, dict[str, str]]]:
+def build_mention_ranking(
+    mentions: list[Any],
+    comments: list[Any],
+    top_comment_count: int,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, str]]]:
     by_person: dict[str, list[Any]] = defaultdict(list)
     names: dict[str, str] = {}
     mentions_by_comment: dict[str, dict[str, str]] = defaultdict(dict)
@@ -89,16 +93,25 @@ def build_mention_ranking(mentions: list[Any], total_comments: int) -> tuple[lis
         names[mention["person_id"]] = mention["display_name"]
         mentions_by_comment[mention["comment_id"]][mention["person_id"]] = mention["display_name"]
 
-    denominator = max(1, total_comments)
+    denominator = max(1, len(comments))
+    top_comment_ids = {
+        comment["id"]
+        for comment in sorted(comments, key=lambda row: int(row["like_count"]), reverse=True)[:top_comment_count]
+    }
     ranking = []
     for person_id, rows in by_person.items():
         unique_by_comment = {row["comment_id"]: row for row in rows}
         representatives = sorted(unique_by_comment.values(), key=lambda row: row["like_count"], reverse=True)[:3]
+        comment_ids = set(unique_by_comment)
         ranking.append({
             "person_id": person_id,
             "display_name": names[person_id],
             "mention_comment_count": len(unique_by_comment),
             "mention_rate": len(unique_by_comment) / denominator,
+            "top_comment_mention_count": len(comment_ids & top_comment_ids),
+            "single_mention_count": sum(1 for comment_id in comment_ids if len(mentions_by_comment[comment_id]) == 1),
+            "multi_mention_count": sum(1 for comment_id in comment_ids if len(mentions_by_comment[comment_id]) > 1),
+            "raw_like_sum": sum(max(0, int(row["like_count"])) for row in unique_by_comment.values()),
             "like_weighted_score": sum(1 + math.log1p(max(0, int(row["like_count"]))) for row in unique_by_comment.values()),
             "representative_comments": [
                 {
@@ -532,7 +545,8 @@ def build_report_payload(
     alias_suggestions: list[dict[str, Any]],
     llm_assist: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
+    top_comment_count = int(analysis_config.get("top_comment_count", 50))
+    ranking, mentions_by_comment = build_mention_ranking(mentions, comments, top_comment_count)
     mention_details_by_comment = build_mention_details_by_comment(mentions)
     appeal_summary = build_appeal_summary(mentions)
     cooccurrence = build_cooccurrence(mentions)
