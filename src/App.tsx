@@ -96,16 +96,24 @@ export default function App() {
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const acceptedCount = useMemo(
-    () => candidates?.persons.filter((person) => person.status === "accepted").length ?? 0,
-    [candidates]
-  );
+  const candidateSummary = useMemo(() => {
+    const persons = candidates?.persons ?? [];
+    return {
+      accepted: persons.filter((person) => person.status === "accepted").length,
+      rejected: persons.filter((person) => person.status === "rejected").length,
+      pending: persons.filter((person) => person.status !== "accepted" && person.status !== "rejected").length,
+      total: persons.length
+    };
+  }, [candidates]);
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
+    setLastAction(null);
     setError(null);
     setReport(null);
     try {
@@ -131,9 +139,14 @@ export default function App() {
     }
   }
 
-  async function updateCandidate(action: { type: string; person_id?: string; alias_id?: string }) {
+  async function updateCandidate(
+    action: { type: string; person_id?: string; alias_id?: string },
+    label: string
+  ) {
     if (!run) return;
     setBusy(true);
+    setUpdatingId(action.person_id ?? action.alias_id ?? null);
+    setLastAction(null);
     setError(null);
     try {
       await api(`/api/runs/${run.run_id}/candidate-actions`, {
@@ -142,16 +155,19 @@ export default function App() {
       });
       const nextCandidates = await api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`);
       setCandidates(nextCandidates);
+      setLastAction(label);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setUpdatingId(null);
     }
   }
 
   async function continueRun() {
     if (!run) return;
     setBusy(true);
+    setLastAction(null);
     setError(null);
     try {
       const state = await api<RunState>(`/api/runs/${run.run_id}/continue`, { method: "POST" });
@@ -223,26 +239,51 @@ export default function App() {
               <h2>人物候補と alias</h2>
               <p>短い alias や低頻度候補は保留にしています。採用済み alias だけで集計します。</p>
             </div>
-            <button disabled={busy || acceptedCount === 0} onClick={continueRun}>
+            <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
               候補を確定して集計
             </button>
           </div>
+          <div className="review-summary" aria-live="polite">
+            <span>候補 {candidateSummary.total} 件</span>
+            <strong>採用 {candidateSummary.accepted} 件</strong>
+            <span>保留 {candidateSummary.pending} 件</span>
+            <span>除外 {candidateSummary.rejected} 件</span>
+            {lastAction ? <em>{lastAction}</em> : null}
+          </div>
           <div className="candidate-grid">
             {candidates.persons.map((person) => (
-              <article className="candidate-card" key={person.person_id}>
+              <article className={`candidate-card candidate-card--${person.status}`} key={person.person_id}>
                 <div className="candidate-card__header">
                   <div>
                     <h3>{person.display_name}</h3>
                     <p>{person.reason}</p>
                   </div>
-                  <span className={`status status-${person.status}`}>{person.status}</span>
+                  <span className={`status status-${person.status}`}>{statusLabel(person.status)}</span>
                 </div>
                 <div className="candidate-actions">
-                  <button onClick={() => updateCandidate({ type: "accept_person", person_id: person.person_id })}>
-                    採用
+                  <button
+                    className={person.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
+                    disabled={busy || person.status === "accepted"}
+                    onClick={() =>
+                      updateCandidate(
+                        { type: "accept_person", person_id: person.person_id },
+                        `${person.display_name} を採用しました`
+                      )
+                    }
+                  >
+                    {updatingId === person.person_id ? "処理中" : person.status === "accepted" ? "採用済み" : "採用"}
                   </button>
-                  <button onClick={() => updateCandidate({ type: "reject_person", person_id: person.person_id })}>
-                    除外
+                  <button
+                    className={person.status === "rejected" ? "choice-button choice-button--rejected" : "choice-button"}
+                    disabled={busy || person.status === "rejected"}
+                    onClick={() =>
+                      updateCandidate(
+                        { type: "reject_person", person_id: person.person_id },
+                        `${person.display_name} を除外しました`
+                      )
+                    }
+                  >
+                    {updatingId === person.person_id ? "処理中" : person.status === "rejected" ? "除外済み" : "除外"}
                   </button>
                 </div>
                 <ul className="alias-list">
@@ -250,12 +291,30 @@ export default function App() {
                     <li key={alias.alias_id}>
                       <span>{alias.alias_text}</span>
                       <span>{alias.hit_count}件</span>
-                      <span className={`status status-${alias.status}`}>{alias.status}</span>
-                      <button onClick={() => updateCandidate({ type: "accept_alias", alias_id: alias.alias_id })}>
-                        採用
+                      <span className={`status status-${alias.status}`}>{statusLabel(alias.status)}</span>
+                      <button
+                        className={alias.status === "accepted" ? "choice-button choice-button--selected" : "choice-button"}
+                        disabled={busy || alias.status === "accepted"}
+                        onClick={() =>
+                          updateCandidate(
+                            { type: "accept_alias", alias_id: alias.alias_id },
+                            `alias「${alias.alias_text}」を採用しました`
+                          )
+                        }
+                      >
+                        {updatingId === alias.alias_id ? "処理中" : alias.status === "accepted" ? "採用済み" : "採用"}
                       </button>
-                      <button onClick={() => updateCandidate({ type: "reject_alias", alias_id: alias.alias_id })}>
-                        除外
+                      <button
+                        className={alias.status === "rejected" ? "choice-button choice-button--rejected" : "choice-button"}
+                        disabled={busy || alias.status === "rejected"}
+                        onClick={() =>
+                          updateCandidate(
+                            { type: "reject_alias", alias_id: alias.alias_id },
+                            `alias「${alias.alias_text}」を除外しました`
+                          )
+                        }
+                      >
+                        {updatingId === alias.alias_id ? "処理中" : alias.status === "rejected" ? "除外済み" : "除外"}
                       </button>
                     </li>
                   ))}
@@ -310,4 +369,12 @@ export default function App() {
       ) : null}
     </main>
   );
+}
+
+function statusLabel(status: string): string {
+  if (status === "accepted") return "採用";
+  if (status === "rejected") return "除外";
+  if (status === "pending") return "保留";
+  if (status === "candidate") return "候補";
+  return status;
 }

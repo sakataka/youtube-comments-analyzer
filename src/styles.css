@@ -34,7 +34,7 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.72;
 }
 
 button + button {
@@ -150,10 +150,63 @@ h3 {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.review-summary {
+  align-items: center;
+  background: #f3f7fc;
+  border: 1px solid #d9e4f0;
+  border-radius: 8px;
+  color: #394858;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+}
+
+.review-summary span,
+.review-summary strong,
+.review-summary em {
+  background: #fff;
+  border: 1px solid #dce5ef;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+  padding: 5px 10px;
+}
+
+.review-summary strong {
+  background: #dff7e9;
+  border-color: #b9e9cd;
+  color: #146c36;
+}
+
+.review-summary em {
+  background: #e8f1ff;
+  border-color: #bfd6ff;
+  color: #154c9f;
+}
+
 .candidate-card {
   border: 1px solid #dfe6ef;
   border-radius: 8px;
   padding: 16px;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.candidate-card--accepted {
+  background: #fbfffd;
+  border-color: #a9dfbf;
+}
+
+.candidate-card--rejected {
+  background: #f7f8fa;
+  border-color: #d5dce6;
+  opacity: 0.78;
 }
 
 .candidate-card__header {
@@ -167,6 +220,25 @@ h3 {
   display: flex;
   gap: 8px;
   margin: 14px 0;
+}
+
+.choice-button {
+  background: #e8edf5;
+  color: #27313d;
+}
+
+.choice-button--selected,
+.choice-button--selected:disabled {
+  background: #178248;
+  color: #fff;
+  opacity: 1;
+}
+
+.choice-button--rejected,
+.choice-button--rejected:disabled {
+  background: #4f5d6d;
+  color: #fff;
+  opacity: 1;
 }
 
 .status {
@@ -185,8 +257,8 @@ h3 {
 
 .status-rejected,
 .status-skipped {
-  background: #eef2f7;
-  color: #5f6d7c;
+  background: #e5e9ef;
+  color: #3f4c5a;
 }
 
 .status-candidate,
@@ -287,6 +359,6 @@ blockquote {
   }
 
   .alias-list li {
-    grid-template-columns: 1fr 54px;
+    grid-template-columns: 1fr 64px;
   }
 }
