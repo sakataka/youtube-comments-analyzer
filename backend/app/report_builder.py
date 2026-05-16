@@ -92,6 +92,7 @@ def build_report_payload(
     mentions: list[Any],
     analysis_config: dict[str, Any],
     persons: list[dict[str, Any]],
+    alias_suggestions: list[dict[str, Any]],
 ) -> dict[str, Any]:
     ranking, mentions_by_comment = build_mention_ranking(mentions, len(comments))
     return {
@@ -123,6 +124,7 @@ def build_report_payload(
         },
         "analysis_config": analysis_config,
         "persons": persons,
+        "alias_suggestions": alias_suggestions,
         "rankings": {"mention_ranking": ranking},
         "comments": [
             {
@@ -141,6 +143,7 @@ def build_report_payload(
         "sections": {
             "mention_ranking": {"status": "available"},
             "person_candidates": {"status": "available"},
+            "alias_suggestions": {"status": "available"},
             "raw_comments": {"status": "available"},
             "appeal_summary": {"status": "skipped", "reason": "LLM disabled in MVP-0"},
             "ambiguous_classification": {"status": "skipped", "reason": "LLM disabled in MVP-0"},

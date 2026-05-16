@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .text import normalize_alias, normalize_text
+from .alias_suggestions import build_alias_suggestions
 from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
 from .mention_classification import alias_match_confidence, alias_matches
 from .report_builder import build_report_payload, fetch_coverage_summary
@@ -591,6 +592,7 @@ class AnalysisStore:
             """,
             (run_id,),
         ).fetchall()
+        persons = self.get_candidates(run_id)["persons"]
         return build_report_payload(
             run_id=run_id,
             video=video,
@@ -598,7 +600,8 @@ class AnalysisStore:
             comments=comments,
             mentions=mentions,
             analysis_config=json.loads(run["config_json"]),
-            persons=self.get_candidates(run_id)["persons"],
+            persons=persons,
+            alias_suggestions=build_alias_suggestions(comments, persons),
         )
 
     def get_candidates(self, run_id: str) -> dict[str, Any]:

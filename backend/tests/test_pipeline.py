@@ -178,6 +178,79 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(reply_comment["parent_comment_id"], "top-1")
             self.assertTrue(reply_comment["mentioned_persons"])
 
+    def test_unknown_alias_suggestions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            store = AnalysisStore(data_dir / "app.sqlite3", data_dir)
+            bundle = {
+                "video": {
+                    "youtube_video_id": "vlpLbiqNhLo",
+                    "url": "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    "title": "Fixture: みりちゃむ",
+                    "channel_title": "Fixture",
+                    "description": "",
+                    "published_at": None,
+                    "youtube_comment_count": None,
+                    "comment_count_available": False,
+                    "youtube_view_count": None,
+                    "youtube_like_count": None,
+                },
+                "comments": [
+                    {
+                        "comment_id": "comment-1",
+                        "parent_comment_id": None,
+                        "author_display_name": "a",
+                        "author_channel_id": "a",
+                        "text_original": "みりちゃむもミッタンも好き",
+                        "like_count": 3,
+                        "published_at": None,
+                        "updated_at": None,
+                        "is_reply": False,
+                        "reply_count": 0,
+                        "source_order": 0,
+                        "api_relevance_order": 0,
+                    },
+                    {
+                        "comment_id": "comment-2",
+                        "parent_comment_id": None,
+                        "author_display_name": "b",
+                        "author_channel_id": "b",
+                        "text_original": "ミッタンの返しが良い",
+                        "like_count": 2,
+                        "published_at": None,
+                        "updated_at": None,
+                        "is_reply": False,
+                        "reply_count": 0,
+                        "source_order": 1,
+                        "api_relevance_order": 1,
+                    },
+                ],
+                "fetch_summary": {
+                    "source": "fixture",
+                    "fetched_at": "2026-01-01T00:00:00+00:00",
+                    "fetched_top_level_count": 2,
+                    "fetched_reply_count": 0,
+                    "total_reply_count_from_threads": 0,
+                    "total_like_count": 5,
+                },
+            }
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 2,
+                    "reply_fetch_mode": "none",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            report = store.classify_and_report(run_id)
+            suggestions = {suggestion["token"]: suggestion for suggestion in report["alias_suggestions"]}
+
+            self.assertIn("ミッタン", suggestions)
+            self.assertEqual(suggestions["ミッタン"]["hit_count"], 2)
+            self.assertEqual(suggestions["ミッタン"]["suggested_person_name"], "みりちゃむ")
+
 
 if __name__ == "__main__":
     unittest.main()

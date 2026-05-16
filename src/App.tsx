@@ -93,6 +93,21 @@ type RankingRow = {
   }>;
 };
 
+type AliasSuggestion = {
+  token: string;
+  normalized_alias: string;
+  hit_count: number;
+  suggested_person_id?: string | null;
+  suggested_person_name?: string | null;
+  reason: string;
+  representative_comments: Array<{
+    comment_id: string;
+    text_original: string;
+    like_count: number;
+    is_reply: boolean;
+  }>;
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -119,6 +134,7 @@ type Report = {
     mention_ranking: RankingRow[];
   };
   persons: Person[];
+  alias_suggestions: AliasSuggestion[];
   sections: Record<string, { status: string; reason?: string }>;
   comments: Array<{
     comment_id: string;
@@ -158,6 +174,8 @@ export default function App() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const [aliasSuggestionDrafts, setAliasSuggestionDrafts] = useState<Record<string, string>>({});
+  const [ignoredAliasSuggestions, setIgnoredAliasSuggestions] = useState<Record<string, boolean>>({});
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
@@ -183,6 +201,10 @@ export default function App() {
   const assignablePersons = useMemo(() => {
     return report?.persons.filter((person) => person.status === "accepted") ?? [];
   }, [report]);
+
+  const visibleAliasSuggestions = useMemo(() => {
+    return (report?.alias_suggestions ?? []).filter((suggestion) => !ignoredAliasSuggestions[suggestion.normalized_alias]);
+  }, [ignoredAliasSuggestions, report]);
 
   const filteredComments = useMemo(() => {
     const query = normalizeSearch(commentSearch);
@@ -344,6 +366,41 @@ export default function App() {
       });
       setReport(nextReport);
       setLastAction(action.type === "add_mention" ? "コメントに人物を追加しました" : "コメントから人物を外しました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptAliasSuggestion(suggestion: AliasSuggestion) {
+    if (!run) return;
+    const personId = aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id || "";
+    if (!personId) return;
+    setBusy(true);
+    setLastAction(null);
+    setError(null);
+    try {
+      await api(`/api/runs/${run.run_id}/candidate-actions`, {
+        method: "POST",
+        body: JSON.stringify({
+          actions: [
+            {
+              type: "add_alias",
+              person_id: personId,
+              alias_text: suggestion.token
+            }
+          ]
+        })
+      });
+      const state = await api<RunState>(`/api/runs/${run.run_id}/continue`, { method: "POST" });
+      const nextCandidates = await api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`);
+      const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
+      setRun(state);
+      setCandidates(nextCandidates);
+      setReport(nextReport);
+      setIgnoredAliasSuggestions((ignored) => ({ ...ignored, [suggestion.normalized_alias]: true }));
+      setLastAction(`表記「${suggestion.token}」を alias に追加しました`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -718,6 +775,84 @@ export default function App() {
               ))}
             </aside>
           </div>
+        </section>
+      ) : null}
+
+      {report ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>未知 alias 候補</h2>
+              <p>既存 alias に入っていない、ニックネームらしい頻出表記です。人物に紐づけると再集計します。</p>
+            </div>
+            <strong>{visibleAliasSuggestions.length} 件</strong>
+          </div>
+          {visibleAliasSuggestions.length ? (
+            <div className="alias-suggestion-grid">
+              {visibleAliasSuggestions.map((suggestion) => (
+                <article className="alias-suggestion-card" key={suggestion.normalized_alias}>
+                  <div>
+                    <h3>{suggestion.token}</h3>
+                    <p>{suggestion.reason}</p>
+                    <strong>{suggestion.hit_count} 件</strong>
+                  </div>
+                  <label>
+                    紐づけ先
+                    <select
+                      value={aliasSuggestionDrafts[suggestion.normalized_alias] ?? suggestion.suggested_person_id ?? ""}
+                      onChange={(event) =>
+                        setAliasSuggestionDrafts((drafts) => ({
+                          ...drafts,
+                          [suggestion.normalized_alias]: event.target.value
+                        }))
+                      }
+                    >
+                      <option value="">人物を選択</option>
+                      {assignablePersons.map((person) => (
+                        <option key={person.person_id} value={person.person_id}>
+                          {person.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="candidate-actions">
+                    <button
+                      type="button"
+                      disabled={busy || !(aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id)}
+                      onClick={() => acceptAliasSuggestion(suggestion)}
+                    >
+                      alias に追加
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        setIgnoredAliasSuggestions((ignored) => ({
+                          ...ignored,
+                          [suggestion.normalized_alias]: true
+                        }))
+                      }
+                    >
+                      今回は無視
+                    </button>
+                  </div>
+                  <details className="alias-evidence">
+                    <summary>代表コメント</summary>
+                    {suggestion.representative_comments.map((comment) => (
+                      <blockquote key={comment.comment_id}>
+                        {comment.text_original}
+                        <small>
+                          {comment.like_count} likes{comment.is_reply ? " / 返信" : ""}
+                        </small>
+                      </blockquote>
+                    ))}
+                  </details>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="list-note">追加候補はありません。</p>
+          )}
         </section>
       ) : null}
 
