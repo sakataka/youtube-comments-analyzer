@@ -352,6 +352,10 @@ type ResultTab =
   | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 type CandidateEntityFilter = "needs_review" | "primary" | "non_primary" | "all";
+type LlmAssistActionPlan = {
+  candidateActions: Array<Record<string, string>>;
+  commentActions: Array<Record<string, string>>;
+};
 
 const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL ?? "");
 
@@ -365,6 +369,45 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(text || `HTTP ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+function buildLlmAssistActionPlan(assist: LlmAssist, persons: Person[]): LlmAssistActionPlan {
+  const candidateActions: Array<Record<string, string>> = [];
+  const commentActions: Array<Record<string, string>> = [];
+  const personsByName = new Map(persons.map((person) => [person.display_name, person]));
+
+  for (const item of assist.candidate_recommendations) {
+    const person = personsByName.get(item.display_name);
+    if (!person) continue;
+    if (item.recommendation === "accept") {
+      candidateActions.push({ type: "accept_person", person_id: person.person_id });
+    } else if (item.recommendation === "reject") {
+      candidateActions.push({ type: "reject_person", person_id: person.person_id });
+    } else if (item.recommendation === "merge" && item.target_display_name) {
+      const target = personsByName.get(item.target_display_name);
+      if (target && target.person_id !== person.person_id) {
+        candidateActions.push({ type: "merge_person", source_person_id: person.person_id, target_person_id: target.person_id });
+      }
+    }
+  }
+
+  for (const item of assist.alias_recommendations) {
+    if (item.confidence === "low") continue;
+    const target = personsByName.get(item.target_display_name);
+    if (target) {
+      candidateActions.push({ type: "add_alias", person_id: target.person_id, alias_text: item.alias });
+    }
+  }
+
+  for (const item of assist.ambiguous_comments) {
+    if (!item.suggested_display_name || item.confidence === "low") continue;
+    const target = personsByName.get(item.suggested_display_name);
+    if (target) {
+      commentActions.push({ type: "add_mention", comment_id: item.comment_id, person_id: target.person_id });
+    }
+  }
+
+  return { candidateActions, commentActions };
 }
 
 export default function App() {
@@ -703,13 +746,14 @@ export default function App() {
         const nextCandidates = await api<CandidatesResponse>(`/api/runs/${completed.run_id}/candidates`);
         setRun(state);
         setCandidates(nextCandidates);
+        await prepareRunForHumanReview(completed.run_id, nextCandidates);
       } else {
         const state = await api<RunState>(`/api/runs/${created.run_id}`);
         const nextCandidates = await api<CandidatesResponse>(`/api/runs/${created.run_id}/candidates`);
         setRun(state);
         setCandidates(nextCandidates);
+        await prepareRunForHumanReview(created.run_id, nextCandidates);
       }
-      setActiveTab("candidates");
       await refreshRunHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -725,6 +769,40 @@ export default function App() {
       if (job.status === "completed") return job;
       if (job.status === "failed") throw new Error(job.error_message || "分析 job が失敗しました");
       await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+  }
+
+  async function prepareRunForHumanReview(runId: string, initialCandidates: CandidatesResponse) {
+    setLastAction("コメント取得と自動割り当てが完了しました。AI 確認と自動補正を実行中です。");
+    const draftRun = await api<RunState>(`/api/runs/${runId}/continue`, { method: "POST" });
+    setRun(draftRun);
+    let nextReport = await api<Report>(`/api/runs/${runId}/report`);
+    setReport(nextReport);
+    setLlmBusy(true);
+    try {
+      const assist = await api<LlmAssist>(`/api/runs/${runId}/llm-assist`, { method: "POST" });
+      nextReport = await api<Report>(`/api/runs/${runId}/report`);
+      if (assist.status === "failed") {
+        setReport(nextReport);
+        setActiveTab("candidates");
+        setLastAction("AI 確認だけ失敗しました。自動割り当ての人間チェックから続けられます。");
+        return;
+      }
+      const applied = await applyLlmAssistActions(runId, assist, initialCandidates.persons);
+      if (applied) {
+        setRun(applied.run);
+        setCandidates(applied.candidates);
+        setReport(applied.report);
+        setLastAction(
+          `AI 確認と自動補正が完了しました（候補 ${applied.candidateActionCount} 件 / コメント ${applied.commentActionCount} 件）。要確認だけ見てから分析へ進んでください。`
+        );
+      } else {
+        setReport(nextReport);
+        setLastAction("AI 確認が完了しました。自動補正できる提案はありません。要確認だけ見てから分析へ進んでください。");
+      }
+      setActiveTab("quality");
+    } finally {
+      setLlmBusy(false);
     }
   }
 
@@ -913,73 +991,52 @@ export default function App() {
     }
   }
 
-  async function applyLlmAssist() {
-    if (!run || !report?.llm_assist || report.llm_assist.status === "failed") return;
-    const candidateActions: Array<Record<string, string>> = [];
-    const commentActions: Array<Record<string, string>> = [];
-    const personsByName = new Map((candidates?.persons ?? report.persons).map((person) => [person.display_name, person]));
-
-    for (const item of report.llm_assist.candidate_recommendations) {
-      const person = personsByName.get(item.display_name);
-      if (!person) continue;
-      if (item.recommendation === "accept") {
-        candidateActions.push({ type: "accept_person", person_id: person.person_id });
-      } else if (item.recommendation === "reject") {
-        candidateActions.push({ type: "reject_person", person_id: person.person_id });
-      } else if (item.recommendation === "merge" && item.target_display_name) {
-        const target = personsByName.get(item.target_display_name);
-        if (target && target.person_id !== person.person_id) {
-          candidateActions.push({ type: "merge_person", source_person_id: person.person_id, target_person_id: target.person_id });
-        }
-      }
-    }
-
-    for (const item of report.llm_assist.alias_recommendations) {
-      if (item.confidence === "low") continue;
-      const target = personsByName.get(item.target_display_name);
-      if (target) {
-        candidateActions.push({ type: "add_alias", person_id: target.person_id, alias_text: item.alias });
-      }
-    }
-
-    for (const item of report.llm_assist.ambiguous_comments) {
-      if (!item.suggested_display_name || item.confidence === "low") continue;
-      const target = personsByName.get(item.suggested_display_name);
-      if (target) {
-        commentActions.push({ type: "add_mention", comment_id: item.comment_id, person_id: target.person_id });
-      }
-    }
+  async function applyLlmAssistActions(runId: string, assist: LlmAssist, persons: Person[]) {
+    const { candidateActions, commentActions } = buildLlmAssistActionPlan(assist, persons);
 
     if (!candidateActions.length && !commentActions.length) {
-      setLastAction("反映できる LLM 提案はありません");
-      return;
+      return null;
     }
 
+    if (candidateActions.length) {
+      await api(`/api/runs/${runId}/candidate-actions`, {
+        method: "POST",
+        body: JSON.stringify({ actions: candidateActions })
+      });
+    }
+
+    const nextRun = await api<RunState>(`/api/runs/${runId}/continue`, { method: "POST" });
+    const nextReport = commentActions.length
+      ? await api<Report>(`/api/runs/${runId}/comment-actions`, {
+          method: "POST",
+          body: JSON.stringify({ actions: commentActions })
+        })
+      : await api<Report>(`/api/runs/${runId}/report`);
+    const nextCandidates = await api<CandidatesResponse>(`/api/runs/${runId}/candidates`);
+    return {
+      run: nextRun,
+      candidates: nextCandidates,
+      report: nextReport,
+      candidateActionCount: candidateActions.length,
+      commentActionCount: commentActions.length
+    };
+  }
+
+  async function applyLlmAssist() {
+    if (!run || !report?.llm_assist || report.llm_assist.status === "failed") return;
     setBusy(true);
     setLastAction(null);
     setError(null);
     try {
-      if (candidateActions.length) {
-        await api(`/api/runs/${run.run_id}/candidate-actions`, {
-          method: "POST",
-          body: JSON.stringify({ actions: candidateActions })
-        });
+      const applied = await applyLlmAssistActions(run.run_id, report.llm_assist, candidates?.persons ?? report.persons);
+      if (!applied) {
+        setLastAction("反映できる LLM 提案はありません");
+        return;
       }
-      let nextReport: Report;
-      if (commentActions.length) {
-        nextReport = await api<Report>(`/api/runs/${run.run_id}/comment-actions`, {
-          method: "POST",
-          body: JSON.stringify({ actions: commentActions })
-        });
-      } else {
-        const nextRun = await api<RunState>(`/api/runs/${run.run_id}/continue`, { method: "POST" });
-        setRun(nextRun);
-        nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
-      }
-      const nextCandidates = await api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`);
-      setCandidates(nextCandidates);
-      setReport(nextReport);
-      setLastAction(`LLM 提案を反映しました（候補 ${candidateActions.length} 件 / コメント ${commentActions.length} 件）`);
+      setRun(applied.run);
+      setCandidates(applied.candidates);
+      setReport(applied.report);
+      setLastAction(`LLM 提案を反映しました（候補 ${applied.candidateActionCount} 件 / コメント ${applied.commentActionCount} 件）`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1004,7 +1061,7 @@ export default function App() {
             <span>人物言及分析</span>
           </h1>
           <p>
-            コメントを保存してから候補抽出、alias 確認、人物別ランキングまでをローカルで実行します。
+            コメント取得、自動割り当て、AI 確認、自動補正までを先に進め、人間は要確認だけを見てから分析します。
             API キーなしでも fixture で検証できます。
           </p>
         </div>
@@ -1054,7 +1111,7 @@ export default function App() {
             </label>
           </div>
           <button type="submit" disabled={busy}>
-            {busy ? "処理中" : "分析を開始"}
+            {busy ? "準備中" : "コメント取得と自動チェックを開始"}
           </button>
         </form>
       </section>
@@ -1301,6 +1358,19 @@ export default function App() {
         </section>
       ) : null}
 
+      {run ? (
+        <section className="workflow-strip" aria-label="ワークフロー">
+          <span>コメント取得</span>
+          <span>自動割り当て</span>
+          <span>AI確認</span>
+          <span>自動補正</span>
+          <strong>人間チェック</strong>
+          <button type="button" onClick={continueRun} disabled={busy || candidateSummary.accepted === 0}>
+            分析
+          </button>
+        </section>
+      ) : null}
+
       {candidates || report ? (
         <nav className="result-tabs" aria-label="分析結果の表示切り替え">
           <button
@@ -1398,7 +1468,7 @@ export default function App() {
               </AnalysisHelp>
             </div>
             <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
-              候補を確定して集計
+              人間チェックを終えて分析
             </button>
           </div>
           <div className="filter-bar">
@@ -1964,9 +2034,14 @@ export default function App() {
                 全コメントを読み直さずに品質確認できます。
               </AnalysisHelp>
             </div>
-            <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
-              {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
-            </button>
+            <div className="button-row">
+              <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
+                {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
+              </button>
+              <button type="button" disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
+                人間チェックを終えて分析
+              </button>
+            </div>
           </div>
           <div className="review-summary">
             <span>人間確認 {report.quality_review.human_review_items.length} 件</span>

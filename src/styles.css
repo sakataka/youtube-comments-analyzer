@@ -27,6 +27,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
 }
 
 button,
@@ -43,7 +44,9 @@ button {
   cursor: pointer;
   font-weight: 700;
   min-height: 40px;
+  min-width: 0;
   padding: 0 14px;
+  white-space: normal;
 }
 
 button:disabled {
@@ -93,6 +96,7 @@ button + button {
   color: var(--text-muted);
   line-height: 1.7;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .start-form,
@@ -161,7 +165,9 @@ select {
   border-radius: 8px;
   font-weight: 600;
   min-height: 48px;
+  min-width: 0;
   padding: 0 14px;
+  width: 100%;
 }
 
 .field-note {
@@ -229,6 +235,40 @@ select {
   align-items: stretch;
   gap: 14px;
   grid-template-columns: 1fr;
+}
+
+.workflow-strip {
+  align-items: center;
+  background: #172026;
+  border-radius: 8px;
+  color: #dce5ef;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  margin-top: 14px;
+  padding: 10px;
+}
+
+.workflow-strip span,
+.workflow-strip strong {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  min-height: 38px;
+  padding: 11px 10px;
+  text-align: center;
+}
+
+.workflow-strip strong {
+  background: #e8f1ff;
+  border-color: #bfd6ff;
+  color: #154c9f;
+}
+
+.workflow-strip button {
+  min-width: 96px;
 }
 
 .status-panel__wide {
@@ -1981,6 +2021,13 @@ blockquote {
 }
 
 @media (max-width: 760px) {
+  .app-shell {
+    overflow: hidden;
+    padding-left: 16px;
+    padding-right: 16px;
+    width: 100%;
+  }
+
   .hero,
   .start-form,
   .start-form__number-fields,
@@ -2003,6 +2050,19 @@ blockquote {
     grid-template-columns: 1fr;
   }
 
+  .hero > *,
+  .start-form__settings {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .hero p,
+  .field-note,
+  .checkbox-label small,
+  .start-form button[type="submit"] {
+    word-break: break-all;
+  }
+
   .candidate-deck {
     align-items: stretch;
     flex-direction: column;
@@ -2016,6 +2076,14 @@ blockquote {
   .section-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .workflow-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-strip button {
+    grid-column: 1 / -1;
   }
 
   .history-panel summary {
