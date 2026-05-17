@@ -726,6 +726,30 @@ h4 {
   font-size: 11px;
 }
 
+.review-confirmation {
+  align-items: start;
+  background: #fff8ea;
+  border: 1px solid #e9c06a;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.review-confirmation input {
+  margin-top: 3px;
+  min-height: 0;
+  width: auto;
+}
+
+.review-confirmation small {
+  color: #75511a;
+  font-weight: 500;
+  grid-column: 2;
+}
+
 .pending-candidates {
   align-items: start;
   background: #fff8ea;
@@ -1249,6 +1273,45 @@ h4 {
   color: #647181;
   line-height: 1.55;
   margin: 0;
+}
+
+.insight-board {
+  display: grid;
+  gap: 14px;
+}
+
+.insight-hero,
+.insight-grid article,
+.insight-list {
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.insight-hero h3,
+.insight-grid h3,
+.insight-list h3 {
+  margin-bottom: 8px;
+}
+
+.insight-hero p,
+.insight-grid p,
+.insight-list li {
+  color: #526174;
+  line-height: 1.65;
+}
+
+.insight-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.insight-grid ul,
+.insight-list ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
 }
 
 .degraded-box {
@@ -2036,6 +2099,7 @@ blockquote {
   .dashboard-grid,
   .dashboard-charts,
   .llm-assist-grid,
+  .insight-grid,
   .frequent-review-board,
   .appeal-grid,
   .cooccurrence-layout,
@@ -2051,9 +2115,13 @@ blockquote {
   }
 
   .hero > *,
-  .start-form__settings {
+  .start-form,
+  .start-form__settings,
+  .panel,
+  .utility-panels {
     max-width: 100%;
     min-width: 0;
+    width: 100%;
   }
 
   .hero p,

@@ -179,6 +179,25 @@ type LlmAssist = {
   notes: string[];
 };
 
+type AiInsight = {
+  schema_version: string;
+  prompt_version: string;
+  provider: string;
+  source: string;
+  input_hash: string;
+  status?: string;
+  error_message?: string;
+  headline: string;
+  summary: string;
+  insights: Array<{
+    title: string;
+    detail: string;
+    evidence: string[];
+  }>;
+  watch_points: string[];
+  suggested_next_questions: string[];
+};
+
 type AppealPersonSummary = {
   person_id: string;
   display_name: string;
@@ -344,6 +363,7 @@ type ResultTab =
   | "dashboard"
   | "llm"
   | "quality"
+  | "insights"
   | "aliases"
   | "details"
   | "personComments"
@@ -426,6 +446,7 @@ export default function App() {
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [llmBusy, setLlmBusy] = useState(false);
+  const [insightBusy, setInsightBusy] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>({});
   const [aliasSuggestionDrafts, setAliasSuggestionDrafts] = useState<Record<string, string>>({});
@@ -448,6 +469,9 @@ export default function App() {
   const [selectedDetailPersonId, setSelectedDetailPersonId] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
+  const [humanReviewConfirmedByRun, setHumanReviewConfirmedByRun] = useState<Record<string, boolean>>({});
+  const [analysisFinalByRun, setAnalysisFinalByRun] = useState<Record<string, boolean>>({});
 
   const candidateSummary = useMemo(() => {
     const persons = candidates?.persons ?? [];
@@ -559,6 +583,10 @@ export default function App() {
       acceptedPersons: report.persons.filter((person) => person.status === "accepted").length
     };
   }, [report]);
+
+  const humanReviewConfirmed = run ? Boolean(humanReviewConfirmedByRun[run.run_id]) : false;
+  const analysisFinal = Boolean(run && report && analysisFinalByRun[run.run_id]);
+  const canFinishHumanReview = Boolean(run && candidateSummary.accepted > 0 && humanReviewConfirmed);
 
   useEffect(() => {
     void refreshRunHistory();
@@ -694,6 +722,7 @@ export default function App() {
     setLastAction(null);
     setError(null);
     setReport(null);
+    setAiInsight(null);
     setRunJob(null);
     try {
       const state = await api<RunState>(`/api/runs/${runId}`);
@@ -708,6 +737,11 @@ export default function App() {
       setCandidates(nextCandidates);
       setActiveTab(nextReport ? "dashboard" : "candidates");
       setReport(nextReport);
+      if (nextReport) {
+        setHumanReviewConfirmedByRun((items) => ({ ...items, [runId]: true }));
+        setAnalysisFinalByRun((items) => ({ ...items, [runId]: true }));
+        await loadAiInsight(runId);
+      }
       setUrl(state.video?.url ?? url);
       setMaxComments(state.fetch_summary?.max_comments_requested ?? maxComments);
       setReplyFetchMode((state.fetch_summary?.reply_fetch_mode as "none" | "inline_subset" | "full") ?? replyFetchMode);
@@ -725,6 +759,7 @@ export default function App() {
     setLastAction(null);
     setError(null);
     setReport(null);
+    setAiInsight(null);
     try {
       const created = await api<RunCreateResponse>("/api/runs", {
         method: "POST",
@@ -773,6 +808,9 @@ export default function App() {
   }
 
   async function prepareRunForHumanReview(runId: string, initialCandidates: CandidatesResponse) {
+    setHumanReviewConfirmedByRun((items) => ({ ...items, [runId]: false }));
+    setAnalysisFinalByRun((items) => ({ ...items, [runId]: false }));
+    setAiInsight(null);
     setLastAction("コメント取得と自動割り当てが完了しました。AI 確認と自動補正を実行中です。");
     const draftRun = await api<RunState>(`/api/runs/${runId}/continue`, { method: "POST" });
     setRun(draftRun);
@@ -836,6 +874,9 @@ export default function App() {
           return Math.min(index + 1, Math.max(visibleCandidatePersons.length - 1, 0));
         });
       }
+      setAiInsight(null);
+      setAnalysisFinalByRun((items) => ({ ...items, [run.run_id]: false }));
+      setHumanReviewConfirmedByRun((items) => ({ ...items, [run.run_id]: false }));
       setLastAction(label);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -907,7 +948,9 @@ export default function App() {
       const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
       setRun(state);
       setReport(nextReport);
+      setAnalysisFinalByRun((items) => ({ ...items, [run.run_id]: true }));
       setActiveTab("dashboard");
+      setLastAction("人間チェックを反映して分析を更新しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -927,6 +970,7 @@ export default function App() {
       });
       setReport(nextReport);
       setCommentsRefreshKey((key) => key + 1);
+      setAiInsight(null);
       setLastAction(action.type === "add_mention" ? "コメントに人物を追加しました" : "コメントから人物を外しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -961,6 +1005,7 @@ export default function App() {
       setRun(state);
       setCandidates(nextCandidates);
       setReport(nextReport);
+      setAiInsight(null);
       setIgnoredAliasSuggestions((ignored) => ({ ...ignored, [suggestion.normalized_alias]: true }));
       setAliasSuggestionReview((reviews) => {
         const { [suggestion.normalized_alias]: _removed, ...rest } = reviews;
@@ -988,6 +1033,32 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLlmBusy(false);
+    }
+  }
+
+  async function loadAiInsight(runId: string) {
+    try {
+      const insight = await api<AiInsight>(`/api/runs/${runId}/ai-insight`);
+      setAiInsight(insight);
+    } catch {
+      setAiInsight(null);
+    }
+  }
+
+  async function runAiInsight() {
+    if (!run || !analysisFinal) return;
+    setInsightBusy(true);
+    setLastAction(null);
+    setError(null);
+    try {
+      const insight = await api<AiInsight>(`/api/runs/${run.run_id}/ai-insight`, { method: "POST" });
+      setAiInsight(insight);
+      setActiveTab("insights");
+      setLastAction(insight.status === "failed" ? "AI インサイトだけ失敗しました。通常分析は有効です。" : "AI インサイトを更新しました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInsightBusy(false);
     }
   }
 
@@ -1036,6 +1107,7 @@ export default function App() {
       setRun(applied.run);
       setCandidates(applied.candidates);
       setReport(applied.report);
+      setAiInsight(null);
       setLastAction(`LLM 提案を反映しました（候補 ${applied.candidateActionCount} 件 / コメント ${applied.commentActionCount} 件）`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1365,7 +1437,7 @@ export default function App() {
           <span>AI確認</span>
           <span>自動補正</span>
           <strong>人間チェック</strong>
-          <button type="button" onClick={continueRun} disabled={busy || candidateSummary.accepted === 0}>
+          <button type="button" onClick={continueRun} disabled={busy || !canFinishHumanReview}>
             分析
           </button>
         </section>
@@ -1385,7 +1457,7 @@ export default function App() {
             type="button"
             className={activeTab === "dashboard" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("dashboard")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             概要
           </button>
@@ -1407,6 +1479,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={activeTab === "insights" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("insights")}
+            disabled={!analysisFinal}
+          >
+            AIインサイト
+          </button>
+          <button
+            type="button"
             className={activeTab === "aliases" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("aliases")}
             disabled={!report}
@@ -1417,7 +1497,7 @@ export default function App() {
             type="button"
             className={activeTab === "details" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("details")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             人物詳細
           </button>
@@ -1425,7 +1505,7 @@ export default function App() {
             type="button"
             className={activeTab === "personComments" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("personComments")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             人物コメント
           </button>
@@ -1433,7 +1513,7 @@ export default function App() {
             type="button"
             className={activeTab === "cooccurrence" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("cooccurrence")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             関係性
           </button>
@@ -1441,7 +1521,7 @@ export default function App() {
             type="button"
             className={activeTab === "clusters" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("clusters")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             クラスタ
           </button>
@@ -1449,7 +1529,7 @@ export default function App() {
             type="button"
             className={activeTab === "comments" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("comments")}
-            disabled={!report}
+            disabled={!analysisFinal}
           >
             コメント
           </button>
@@ -1467,7 +1547,7 @@ export default function App() {
                 ここで採用した人物と表記だけが、以降のランキングやコメント紐づけに使われます。
               </AnalysisHelp>
             </div>
-            <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
+            <button disabled={busy || !canFinishHumanReview} onClick={continueRun}>
               人間チェックを終えて分析
             </button>
           </div>
@@ -1769,7 +1849,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && activeTab === "dashboard" ? (
+      {report && analysisFinal && activeTab === "dashboard" ? (
         <section className="panel dashboard-panel">
           <div className="section-heading">
             <div>
@@ -2038,11 +2118,23 @@ export default function App() {
               <button type="button" disabled={llmBusy || busy} onClick={runLlmAssist}>
                 {llmBusy ? "分析中" : report.llm_assist ? "LLM 補助を再実行" : "LLM 補助を実行"}
               </button>
-              <button type="button" disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
+              <button type="button" disabled={busy || !canFinishHumanReview} onClick={continueRun}>
                 人間チェックを終えて分析
               </button>
             </div>
           </div>
+          <label className="review-confirmation">
+            <input
+              type="checkbox"
+              checked={humanReviewConfirmed}
+              onChange={(event) => {
+                if (!run) return;
+                setHumanReviewConfirmedByRun((items) => ({ ...items, [run.run_id]: event.target.checked }));
+              }}
+            />
+            人間チェックを完了した
+            <small>要確認コメントと候補確認を見終えると、分析ボタンを押せます。</small>
+          </label>
           <div className="review-summary">
             <span>人間確認 {report.quality_review.human_review_items.length} 件</span>
             <span>低 confidence {report.quality_review.low_confidence_comments.length} 件</span>
@@ -2053,6 +2145,78 @@ export default function App() {
           <QualityReviewList title="低 confidence comments" items={report.quality_review.low_confidence_comments} />
           <QualityReviewList title="AI 判定と辞書判定の差分" items={report.quality_review.ai_dictionary_conflicts} />
           <QualityReviewList title="LLM ambiguous classification" items={report.quality_review.llm_ambiguous_comments} />
+        </section>
+      ) : null}
+
+      {report && activeTab === "insights" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>AI インサイト</h2>
+              <p>分析結果の集計サマリーだけを AI に渡し、今回のコメント状況の発見を整理します。</p>
+              <AnalysisHelp>
+                個々のコメント全文ではなく、ランキング、共起、クラスタ、魅力カテゴリ、品質確認件数などの集計済み情報を使います。
+                人間チェックを終えて分析を確定したあとにだけ実行できます。
+              </AnalysisHelp>
+            </div>
+            <button type="button" disabled={busy || insightBusy || !analysisFinal} onClick={runAiInsight}>
+              {insightBusy ? "抽出中" : aiInsight ? "AI インサイトを再実行" : "AI インサイトを抽出"}
+            </button>
+          </div>
+          {!analysisFinal ? (
+            <p className="list-note">人間チェックを終えて分析すると実行できます。</p>
+          ) : aiInsight?.status === "failed" ? (
+            <div className="degraded-box">
+              <strong>AI インサイトだけ失敗しました</strong>
+              <p>通常の分析結果は有効です。</p>
+              <small>{aiInsight.error_message || "原因未取得"}</small>
+            </div>
+          ) : aiInsight ? (
+            <div className="insight-board">
+              <article className="insight-hero">
+                <span className="label">Insight</span>
+                <h3>{aiInsight.headline || "AI インサイト"}</h3>
+                <p>{aiInsight.summary}</p>
+              </article>
+              <div className="insight-grid">
+                {aiInsight.insights.map((item, index) => (
+                  <article key={`${item.title}-${index}`}>
+                    <h3>{item.title}</h3>
+                    <p>{item.detail}</p>
+                    {item.evidence?.length ? (
+                      <ul>
+                        {item.evidence.map((evidence) => (
+                          <li key={evidence}>{evidence}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+              {aiInsight.watch_points.length ? (
+                <div className="insight-list">
+                  <h3>注意して見る点</h3>
+                  <ul>
+                    {aiInsight.watch_points.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {aiInsight.suggested_next_questions.length ? (
+                <div className="insight-list">
+                  <h3>さらに深掘りするなら</h3>
+                  <ul>
+                    {aiInsight.suggested_next_questions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="list-note">まだ AI インサイトは抽出していません。</p>
+          )}
         </section>
       ) : null}
 
@@ -2134,7 +2298,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && selectedDetailPerson && selectedPersonDetails && activeTab === "details" ? (
+      {report && analysisFinal && selectedDetailPerson && selectedPersonDetails && activeTab === "details" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -2265,7 +2429,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && activeTab === "cooccurrence" ? (
+      {report && analysisFinal && activeTab === "cooccurrence" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -2337,7 +2501,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && activeTab === "clusters" ? (
+      {report && analysisFinal && activeTab === "clusters" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -2386,7 +2550,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && selectedDetailPerson && activeTab === "personComments" ? (
+      {report && analysisFinal && selectedDetailPerson && activeTab === "personComments" ? (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -2433,7 +2597,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {report && activeTab === "comments" ? (
+      {report && analysisFinal && activeTab === "comments" ? (
         <section className="panel">
           <div className="section-heading">
             <div>

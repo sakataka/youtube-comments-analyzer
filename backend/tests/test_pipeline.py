@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from backend.app.alias_suggestions import extract_nickname_like_tokens
 from backend.app.candidate_extraction import build_candidate_seeds, extract_candidate_tokens, extract_description_person_list_tokens
-from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assist_json
+from backend.app.llm_assist import extract_completed_agent_text, parse_ai_insight_json, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.report_builder import build_comment_clusters, person_feature_words
@@ -655,6 +655,72 @@ class PipelineTest(unittest.TestCase):
 ```"""
         )
         self.assertEqual(parsed["schema_version"], "llm_assist.v1")
+
+    def test_ai_insight_prompt_and_cache_flow(self):
+        class FakeInsightClient:
+            def __init__(self):
+                self.calls = 0
+
+            def ask(self, prompt: str) -> str:
+                self.calls += 1
+                self.last_prompt = prompt
+                return json.dumps(
+                    {
+                        "headline": "コメント欄は主要人物への好意的反応が中心",
+                        "summary": "上位ランキングとクラスタから、人物別の反応と掛け合いへの言及が目立つ。",
+                        "insights": [
+                            {
+                                "title": "上位人物に反応が集中",
+                                "detail": "mention_ranking の上位にコメントが集まっている。",
+                                "evidence": ["みりちゃむの言及数が上位"],
+                            }
+                        ],
+                        "watch_points": ["取得範囲が全コメントを代表しているか確認する"],
+                        "suggested_next_questions": ["上位コメント内だけで傾向が変わるか"],
+                    },
+                    ensure_ascii=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+                )
+            store = self.store(data_dir / "app.sqlite3", data_dir)
+            run_id = store.create_run(
+                bundle,
+                {
+                    "max_comments": 20,
+                    "reply_fetch_mode": "none",
+                    "fetch_order": "relevance",
+                    "use_llm": False,
+                    "use_embeddings": False,
+                },
+            )
+            store.classify_and_report(run_id)
+            fake = FakeInsightClient()
+            result = store.run_ai_insight(run_id, client=fake)
+            cached = store.run_ai_insight(run_id, client=fake)
+            latest = store.get_latest_ai_insight(run_id)
+
+            self.assertEqual(fake.calls, 1)
+            self.assertEqual(cached["source"], "cache")
+            self.assertEqual(result["schema_version"], "ai_insight.v1")
+            self.assertEqual(latest["headline"], "コメント欄は主要人物への好意的反応が中心")
+            self.assertTrue((data_dir / "runs" / run_id / "ai_insight.json").exists())
+            self.assertIn("mention_ranking", fake.last_prompt)
+            self.assertNotIn("author_display_name", fake.last_prompt)
+
+    def test_ai_insight_json_parser_accepts_fenced_json(self):
+        parsed = parse_ai_insight_json(
+            """```json
+{"headline":"h","summary":"s","insights":[],"watch_points":["w"],"suggested_next_questions":[]}
+```"""
+        )
+        self.assertEqual(parsed["schema_version"], "ai_insight.v1")
 
     def test_llm_assist_failure_is_saved_as_degraded_report_section(self):
         class FailingLlmClient:

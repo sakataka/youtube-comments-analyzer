@@ -13,10 +13,14 @@ from .alias_suggestions import build_alias_suggestions
 from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
 from .llm_assist import (
     CodexAppServerClient,
+    INSIGHT_PROMPT_VERSION,
     LlmClient,
     PROMPT_VERSION,
+    ai_insight_cache_key,
+    build_ai_insight_prompt,
     build_llm_assist_prompt,
     llm_cache_key,
+    parse_ai_insight_json,
     parse_llm_assist_json,
     read_cached_llm_assist,
     write_cached_llm_assist,
@@ -46,6 +50,23 @@ def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
         "alias_recommendations": [],
         "ambiguous_comments": [],
         "notes": [],
+    }
+
+
+def build_failed_ai_insight(input_hash: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "schema_version": "ai_insight.v1",
+        "prompt_version": INSIGHT_PROMPT_VERSION,
+        "provider": "codex_app_server",
+        "source": "codex_app_server",
+        "input_hash": input_hash,
+        "status": "failed",
+        "error_message": str(exc),
+        "headline": "",
+        "summary": "",
+        "insights": [],
+        "watch_points": [],
+        "suggested_next_questions": [],
     }
 
 
@@ -168,6 +189,17 @@ def init_db(conn: sqlite3.Connection) -> None:
           created_at text not null
         );
         create table if not exists llm_assists (
+          id text primary key,
+          analysis_run_id text not null,
+          input_hash text not null,
+          prompt_version text not null,
+          provider text not null,
+          status text not null,
+          result_json text not null,
+          raw_text text,
+          created_at text not null
+        );
+        create table if not exists ai_insights (
           id text primary key,
           analysis_run_id text not null,
           input_hash text not null,
@@ -790,6 +822,37 @@ class AnalysisStore:
         self.persist_report(run_id, self.build_report(run_id))
         return result
 
+    def run_ai_insight(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
+        self.get_latest_report(run_id)
+        report = self.build_report(run_id)
+        prompt = build_ai_insight_prompt(report)
+        cache_key = ai_insight_cache_key(prompt)
+        cache_dir = self.data_dir / "llm_cache"
+        cached = read_cached_llm_assist(cache_dir, cache_key)
+        cached = cached or self.read_llm_cache(cache_key)
+        if cached:
+            result = {**cached, "source": "cache", "input_hash": cache_key}
+            self.save_ai_insight(run_id, cache_key, result, raw_text=None, status="completed")
+            self._write_run_artifact(run_id, "ai_insight.json", result)
+            return result
+
+        active_client = client or CodexAppServerClient()
+        raw_text = None
+        try:
+            raw_text = active_client.ask(prompt)
+            parsed = parse_ai_insight_json(raw_text)
+        except Exception as exc:
+            result = build_failed_ai_insight(cache_key, exc)
+            self.save_ai_insight(run_id, cache_key, result, raw_text=raw_text, status="failed")
+            self._write_run_artifact(run_id, "ai_insight.json", result)
+            return result
+        result = {**parsed, "source": "codex_app_server", "input_hash": cache_key, "status": "completed"}
+        write_cached_llm_assist(cache_dir, cache_key, result)
+        self.write_llm_cache(cache_key, result, raw_text)
+        self.save_ai_insight(run_id, cache_key, result, raw_text=raw_text, status="completed")
+        self._write_run_artifact(run_id, "ai_insight.json", result)
+        return result
+
     def save_llm_assist(
         self,
         run_id: str,
@@ -802,6 +865,30 @@ class AnalysisStore:
             "insert into llm_assists values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 new_id("llm"),
+                run_id,
+                input_hash,
+                result.get("prompt_version") or "",
+                result.get("provider") or "codex_app_server",
+                status,
+                json.dumps(result, ensure_ascii=False),
+                raw_text,
+                utc_now(),
+            ),
+        )
+        self.conn.commit()
+
+    def save_ai_insight(
+        self,
+        run_id: str,
+        input_hash: str,
+        result: dict[str, Any],
+        raw_text: str | None,
+        status: str,
+    ) -> None:
+        self.conn.execute(
+            "insert into ai_insights values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_id("insight"),
                 run_id,
                 input_hash,
                 result.get("prompt_version") or "",
@@ -837,6 +924,15 @@ class AnalysisStore:
     def get_latest_llm_assist(self, run_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "select result_json from llm_assists where analysis_run_id = ? order by created_at desc limit 1",
+            (run_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["result_json"])
+
+    def get_latest_ai_insight(self, run_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "select result_json from ai_insights where analysis_run_id = ? order by created_at desc limit 1",
             (run_id,),
         ).fetchone()
         if not row:
@@ -1069,6 +1165,7 @@ class AnalysisStore:
             "clusters.json",
             "appeal_labels.json",
             "llm_assist.json",
+            "ai_insight.json",
         ]:
             path = artifact_dir / name
             if path.exists():
@@ -1110,6 +1207,7 @@ class AnalysisStore:
             "candidate_action_logs",
             "comment_mention_overrides",
             "llm_assists",
+            "ai_insights",
             "appeal_labels",
             "clusters",
             "aliases",
