@@ -419,14 +419,6 @@ function buildLlmAssistActionPlan(assist: LlmAssist, persons: Person[]): LlmAssi
     }
   }
 
-  for (const item of assist.ambiguous_comments) {
-    if (!item.suggested_display_name || item.confidence === "low") continue;
-    const target = personsByName.get(item.suggested_display_name);
-    if (target) {
-      commentActions.push({ type: "add_mention", comment_id: item.comment_id, person_id: target.person_id });
-    }
-  }
-
   return { candidateActions, commentActions };
 }
 
@@ -832,7 +824,7 @@ export default function App() {
         setCandidates(applied.candidates);
         setReport(applied.report);
         setLastAction(
-          `AI 確認と自動補正が完了しました（候補 ${applied.candidateActionCount} 件 / コメント ${applied.commentActionCount} 件）。要確認だけ見てから分析へ進んでください。`
+          `AI 確認と自動補正が完了しました（候補 ${applied.candidateActionCount} 件）。曖昧コメントは自動反映せず、要確認に残しています。`
         );
       } else {
         setReport(nextReport);
@@ -1108,7 +1100,7 @@ export default function App() {
       setCandidates(applied.candidates);
       setReport(applied.report);
       setAiInsight(null);
-      setLastAction(`LLM 提案を反映しました（候補 ${applied.candidateActionCount} 件 / コメント ${applied.commentActionCount} 件）`);
+      setLastAction(`LLM 提案を反映しました（候補 ${applied.candidateActionCount} 件）。曖昧コメントは要確認に残しています。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2026,7 +2018,7 @@ export default function App() {
               <p>Codex app server 経由で、候補整理、alias 補完案、曖昧コメントだけをレビュー補助します。</p>
               <AnalysisHelp>
                 ルールベース集計だけでは迷いやすい候補統合、別表記、曖昧なコメントを AI が補助的に提案します。
-                件数集計そのものは deterministic な通常レポート側を正として扱います。
+                曖昧コメントは自動で人物に紐づけず、要確認の材料として扱います。
               </AnalysisHelp>
             </div>
             <div className="button-row">
