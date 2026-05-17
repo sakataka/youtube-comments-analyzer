@@ -237,38 +237,87 @@ select {
   grid-template-columns: 1fr;
 }
 
-.workflow-strip {
-  align-items: center;
-  background: #172026;
-  border-radius: 8px;
-  color: #dce5ef;
+.workflow-board {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
-  padding: 10px;
 }
 
-.workflow-strip span,
-.workflow-strip strong {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+.workflow-step {
+  align-items: start;
+  background: #fff;
+  border: 1px solid #dce3ec;
   border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.2;
-  min-height: 38px;
-  padding: 11px 10px;
-  text-align: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 148px;
+  padding: 14px;
 }
 
-.workflow-strip strong {
+.workflow-step span {
+  align-items: center;
+  background: #edf2f8;
+  border-radius: 999px;
+  color: #435264;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.workflow-step strong {
+  color: #172026;
+  display: block;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.workflow-step p {
+  color: #697789;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+  margin: 6px 0 0;
+}
+
+.workflow-step em,
+.workflow-step button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.workflow-step em {
+  background: #f3f6fa;
+  border-radius: 999px;
+  color: #566579;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  padding: 6px 10px;
+}
+
+.workflow-step--active {
+  border-color: #8fb8ff;
+  box-shadow: 0 10px 28px rgba(63, 125, 219, 0.14);
+}
+
+.workflow-step--active span {
+  background: #154c9f;
+  color: #fff;
+}
+
+.workflow-step--active em {
   background: #e8f1ff;
-  border-color: #bfd6ff;
   color: #154c9f;
 }
 
-.workflow-strip button {
-  min-width: 96px;
+.workflow-step--done span {
+  background: #dff7ea;
+  color: #13713b;
 }
 
 .status-panel__wide {
@@ -2096,6 +2145,8 @@ blockquote {
   .start-form__number-fields,
   .utility-panels,
   .status-panel,
+  .run-overview,
+  .workflow-board,
   .dashboard-grid,
   .dashboard-charts,
   .llm-assist-grid,
@@ -2146,12 +2197,17 @@ blockquote {
     flex-direction: column;
   }
 
-  .workflow-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .workflow-step {
+    min-height: 0;
   }
 
-  .workflow-strip button {
-    grid-column: 1 / -1;
+  .run-badges {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .run-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .history-panel summary {

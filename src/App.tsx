@@ -579,6 +579,19 @@ export default function App() {
   const humanReviewConfirmed = run ? Boolean(humanReviewConfirmedByRun[run.run_id]) : false;
   const analysisFinal = Boolean(run && report && analysisFinalByRun[run.run_id]);
   const canFinishHumanReview = Boolean(run && candidateSummary.accepted > 0 && humanReviewConfirmed);
+  const workflowStep = !run
+    ? "start"
+    : runJob && runJob.status !== "completed"
+      ? "auto"
+      : llmBusy
+        ? "auto"
+        : !analysisFinal
+          ? "review"
+          : "insight";
+  const humanReviewCount =
+    candidateSummary.pendingPrimary +
+    visibleAliasSuggestions.length +
+    (report?.quality_review.human_review_items.length ?? 0);
 
   useEffect(() => {
     void refreshRunHistory();
@@ -1423,15 +1436,47 @@ export default function App() {
       ) : null}
 
       {run ? (
-        <section className="workflow-strip" aria-label="ワークフロー">
-          <span>コメント取得</span>
-          <span>自動割り当て</span>
-          <span>AI確認</span>
-          <span>自動補正</span>
-          <strong>人間チェック</strong>
-          <button type="button" onClick={continueRun} disabled={busy || !canFinishHumanReview}>
-            分析
-          </button>
+        <section className="workflow-board" aria-label="分析ワークフロー">
+          <article className={`workflow-step ${workflowStep === "auto" ? "workflow-step--active" : "workflow-step--done"}`}>
+            <span>1</span>
+            <div>
+              <strong>取得とAI自動整理</strong>
+              <p>コメント取得、人物候補、alias、明確な紐づけを先に処理します。</p>
+            </div>
+            <em>{workflowStep === "auto" ? "処理中" : "完了"}</em>
+          </article>
+          <article className={`workflow-step ${workflowStep === "review" ? "workflow-step--active" : analysisFinal ? "workflow-step--done" : ""}`}>
+            <span>2</span>
+            <div>
+              <strong>人間チェック</strong>
+              <p>参加者の採用、alias 更新、曖昧コメントの判断だけを確認します。</p>
+            </div>
+            <em>{analysisFinal ? "完了" : humanReviewCount ? `確認 ${humanReviewCount} 件` : "確認待ち"}</em>
+          </article>
+          <article className={`workflow-step ${analysisFinal ? "workflow-step--done" : ""}`}>
+            <span>3</span>
+            <div>
+              <strong>分析結果</strong>
+              <p>人間チェック後の人物割り当てでランキング、関係性、詳細を更新します。</p>
+            </div>
+            {analysisFinal ? (
+              <em>集計済み</em>
+            ) : (
+              <button type="button" onClick={continueRun} disabled={busy || !canFinishHumanReview}>
+                分析する
+              </button>
+            )}
+          </article>
+          <article className={`workflow-step ${workflowStep === "insight" ? "workflow-step--active" : ""}`}>
+            <span>4</span>
+            <div>
+              <strong>AIインサイト</strong>
+              <p>確定済みの集計サマリーだけを使い、最後にコメント状況を要約します。</p>
+            </div>
+            <button type="button" onClick={runAiInsight} disabled={busy || insightBusy || !analysisFinal}>
+              {insightBusy ? "抽出中" : aiInsight ? "再抽出" : "抽出する"}
+            </button>
+          </article>
         </section>
       ) : null}
 
@@ -1447,22 +1492,6 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={activeTab === "dashboard" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
-            onClick={() => setActiveTab("dashboard")}
-            disabled={!analysisFinal}
-          >
-            概要
-          </button>
-          <button
-            type="button"
-            className={activeTab === "llm" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
-            onClick={() => setActiveTab("llm")}
-            disabled={!report}
-          >
-            LLM補助
-          </button>
-          <button
-            type="button"
             className={activeTab === "quality" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("quality")}
             disabled={!report}
@@ -1471,19 +1500,27 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={activeTab === "insights" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
-            onClick={() => setActiveTab("insights")}
-            disabled={!analysisFinal}
-          >
-            AIインサイト
-          </button>
-          <button
-            type="button"
             className={activeTab === "aliases" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("aliases")}
             disabled={!report}
           >
             頻出語レビュー
+          </button>
+          <button
+            type="button"
+            className={activeTab === "llm" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("llm")}
+            disabled={!report}
+          >
+            AI補助ログ
+          </button>
+          <button
+            type="button"
+            className={activeTab === "dashboard" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("dashboard")}
+            disabled={!analysisFinal}
+          >
+            概要
           </button>
           <button
             type="button"
@@ -1524,6 +1561,14 @@ export default function App() {
             disabled={!analysisFinal}
           >
             コメント
+          </button>
+          <button
+            type="button"
+            className={activeTab === "insights" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("insights")}
+            disabled={!analysisFinal}
+          >
+            AIインサイト
           </button>
         </nav>
       ) : null}
