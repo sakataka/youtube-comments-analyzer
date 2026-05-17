@@ -281,6 +281,20 @@ class PipelineTest(unittest.TestCase):
             self.assertGreater(len(mentioned_comments), 0)
             target_comment = mentioned_comments[0]
             target_person = target_comment["mentioned_persons"][0]
+            first_page = store.get_comments_page(run_id, limit=5, offset=0)
+            self.assertEqual(first_page["limit"], 5)
+            self.assertEqual(len(first_page["comments"]), 5)
+            self.assertEqual(first_page["total"], len(report["comments"]))
+            person_page = store.get_comments_page(run_id, limit=20, offset=0, person_id=target_person["person_id"])
+            self.assertGreater(person_page["total"], 0)
+            self.assertTrue(
+                all(
+                    target_person["person_id"] in {person["person_id"] for person in comment["mentioned_persons"]}
+                    for comment in person_page["comments"]
+                )
+            )
+            search_page = store.get_comments_page(run_id, limit=10, offset=0, search=target_comment["text_original"][:4])
+            self.assertGreater(search_page["total"], 0)
             updated_report = store.apply_comment_actions(
                 run_id,
                 [

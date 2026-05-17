@@ -86,6 +86,7 @@ type LikeDistributionBucket = {
 type Alias = {
   alias_id: string;
   alias_text: string;
+  normalized_alias: string;
   hit_count: number;
   mention_comment_count: number;
   confidence: number;
@@ -263,6 +264,23 @@ type QualityReviewComment = {
   llm_confidence?: string | null;
 };
 
+type ReportComment = {
+  comment_id: string;
+  text_original: string;
+  like_count: number;
+  is_reply: boolean;
+  parent_comment_id?: string | null;
+  mentioned_persons: ReviewMention[];
+};
+
+type CommentsPage = {
+  run_id: string;
+  total: number;
+  limit: number;
+  offset: number;
+  comments: ReportComment[];
+};
+
 type Report = {
   schema_version: string;
   run_id: string;
@@ -318,22 +336,20 @@ type Report = {
     human_review_items: QualityReviewComment[];
   };
   sections: Record<string, { status: string; reason?: string }>;
-  comments: Array<{
-    comment_id: string;
-    text_original: string;
-    like_count: number;
-    is_reply: boolean;
-    parent_comment_id?: string | null;
-    mentioned_persons: Array<{
-      person_id: string;
-      display_name: string;
-      confidence: number;
-      match_method: string;
-    }>;
-  }>;
+  comments: ReportComment[];
 };
 
-type ResultTab = "candidates" | "dashboard" | "llm" | "quality" | "aliases" | "details" | "cooccurrence" | "clusters" | "comments";
+type ResultTab =
+  | "candidates"
+  | "dashboard"
+  | "llm"
+  | "quality"
+  | "aliases"
+  | "details"
+  | "personComments"
+  | "cooccurrence"
+  | "clusters"
+  | "comments";
 type AliasReviewState = "alias_candidate" | "needs_review" | "common_word";
 type CandidateEntityFilter = "needs_review" | "primary" | "non_primary" | "all";
 
@@ -377,6 +393,14 @@ export default function App() {
   const [candidateReviewIndex, setCandidateReviewIndex] = useState(0);
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
+  const [commentPage, setCommentPage] = useState(0);
+  const [commentPageSize, setCommentPageSize] = useState(100);
+  const [commentsPageData, setCommentsPageData] = useState<CommentsPage | null>(null);
+  const [personCommentPage, setPersonCommentPage] = useState(0);
+  const [personCommentPageSize, setPersonCommentPageSize] = useState(100);
+  const [personCommentsPageData, setPersonCommentsPageData] = useState<CommentsPage | null>(null);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsRefreshKey, setCommentsRefreshKey] = useState(0);
   const [commentPersonDrafts, setCommentPersonDrafts] = useState<Record<string, string>>({});
   const [selectedDetailPersonId, setSelectedDetailPersonId] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
@@ -445,19 +469,6 @@ export default function App() {
     };
   }, [aliasSuggestionReview, report, visibleAliasSuggestions]);
 
-  const filteredComments = useMemo(() => {
-    const query = normalizeSearch(commentSearch);
-    const comments = report?.comments ?? [];
-    return comments.filter((comment) => {
-      const matchesText = !query || normalizeSearch(comment.text_original).includes(query);
-      const matchesPerson =
-        commentPersonFilter === "all" ||
-        (commentPersonFilter === "unassigned" && comment.mentioned_persons.length === 0) ||
-        comment.mentioned_persons.some((person) => person.person_id === commentPersonFilter);
-      return matchesText && matchesPerson;
-    });
-  }, [commentPersonFilter, commentSearch, report]);
-
   useEffect(() => {
     setCandidateReviewIndex(0);
   }, [candidateEntityFilter, candidates?.run_id]);
@@ -520,6 +531,63 @@ export default function App() {
       setCandidateReviewIndex(Math.max(visibleCandidatePersons.length - 1, 0));
     }
   }, [candidateReviewIndex, visibleCandidatePersons.length]);
+
+  useEffect(() => {
+    setCommentPage(0);
+  }, [commentPersonFilter, commentSearch, commentPageSize, report?.run_id]);
+
+  useEffect(() => {
+    setPersonCommentPage(0);
+  }, [personCommentPageSize, report?.run_id, selectedDetailPersonId]);
+
+  useEffect(() => {
+    if (!run || !report || activeTab !== "comments") return;
+    let active = true;
+    setCommentsLoading(true);
+    const params = new URLSearchParams({
+      limit: String(commentPageSize),
+      offset: String(commentPage * commentPageSize)
+    });
+    if (commentSearch.trim()) params.set("search", commentSearch.trim());
+    if (commentPersonFilter !== "all") params.set("person_id", commentPersonFilter);
+    api<CommentsPage>(`/api/runs/${run.run_id}/comments?${params.toString()}`)
+      .then((page) => {
+        if (active) setCommentsPageData(page);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) setCommentsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, commentPage, commentPageSize, commentPersonFilter, commentSearch, commentsRefreshKey, report, run]);
+
+  useEffect(() => {
+    if (!run || !report || activeTab !== "personComments" || !selectedDetailPersonId) return;
+    let active = true;
+    setCommentsLoading(true);
+    const params = new URLSearchParams({
+      limit: String(personCommentPageSize),
+      offset: String(personCommentPage * personCommentPageSize),
+      person_id: selectedDetailPersonId
+    });
+    api<CommentsPage>(`/api/runs/${run.run_id}/comments?${params.toString()}`)
+      .then((page) => {
+        if (active) setPersonCommentsPageData(page);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) setCommentsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, commentsRefreshKey, personCommentPage, personCommentPageSize, report, run, selectedDetailPersonId]);
 
   async function refreshRunHistory() {
     try {
@@ -718,6 +786,12 @@ export default function App() {
     jumpToCandidate(pendingPrimaryCandidatePersons[nextIndex].person_id, "primary");
   }
 
+  function openPersonComments(personId: string) {
+    setSelectedDetailPersonId(personId);
+    setPersonCommentPage(0);
+    setActiveTab("personComments");
+  }
+
   async function updateDisplayName(person: Person) {
     const displayName = (displayNameDrafts[person.person_id] ?? person.display_name).trim();
     if (!displayName || displayName === person.display_name) return;
@@ -774,6 +848,7 @@ export default function App() {
         body: JSON.stringify({ actions: [action] })
       });
       setReport(nextReport);
+      setCommentsRefreshKey((key) => key + 1);
       setLastAction(action.type === "add_mention" ? "コメントに人物を追加しました" : "コメントから人物を外しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -782,9 +857,9 @@ export default function App() {
     }
   }
 
-  async function acceptAliasSuggestion(suggestion: AliasSuggestion) {
+  async function acceptAliasSuggestion(suggestion: AliasSuggestion, selectedPersonId?: string) {
     if (!run) return;
-    const personId = aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id || "";
+    const personId = selectedPersonId || aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id || "";
     if (!personId) return;
     setBusy(true);
     setLastAction(null);
@@ -1278,6 +1353,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={activeTab === "personComments" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
+            onClick={() => setActiveTab("personComments")}
+            disabled={!report}
+          >
+            人物コメント
+          </button>
+          <button
+            type="button"
             className={activeTab === "cooccurrence" ? "result-tabs__item result-tabs__item--active" : "result-tabs__item"}
             onClick={() => setActiveTab("cooccurrence")}
             disabled={!report}
@@ -1317,71 +1400,6 @@ export default function App() {
             <button disabled={busy || candidateSummary.accepted === 0} onClick={continueRun}>
               候補を確定して集計
             </button>
-          </div>
-          <div className="review-summary" aria-live="polite">
-            <span>候補 {candidateSummary.total} 件</span>
-            <strong>採用 {candidateSummary.accepted} 件</strong>
-            <button type="button" className="review-summary__pending" onClick={() => setCandidateEntityFilter("needs_review")}>
-              保留 {candidateSummary.pending} 件
-              {candidateSummary.pendingNonPrimary ? <small>人物外 {candidateSummary.pendingNonPrimary}</small> : null}
-            </button>
-            <span>除外 {candidateSummary.rejected} 件</span>
-            <span>人物外候補 {candidateSummary.nonPrimary} 件</span>
-            {lastAction ? <em>{lastAction}</em> : null}
-          </div>
-          {pendingPrimaryCandidatePersons.length ? (
-            <div className="pending-candidates" aria-label="保留中の人物候補">
-              <div>
-                <span className="label">保留中</span>
-                <strong>{candidateSummary.pendingPrimary} 件</strong>
-              </div>
-              <div className="pending-candidates__list">
-                {pendingPrimaryCandidatePersons.slice(0, 18).map((person) => (
-                  <button
-                    key={person.person_id}
-                    type="button"
-                    className="keyword-chip keyword-chip--pending"
-                    onClick={() => jumpToCandidate(person.person_id, "primary")}
-                  >
-                    <span>{person.display_name}</span>
-                    <small>{person.accepted_mention_comment_count}件</small>
-                  </button>
-                ))}
-                {pendingPrimaryCandidatePersons.length > 18 ? (
-                  <span className="keyword-chip keyword-chip--more">+{pendingPrimaryCandidatePersons.length - 18}</span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-          <div className="accepted-keywords" aria-label="決定済み候補">
-            <div>
-              <span className="label">決定済み</span>
-              <strong>採用 {candidateSummary.accepted} / 除外 {candidateSummary.rejected}</strong>
-            </div>
-            <div className="accepted-keywords__list">
-              {decidedPrimaryCandidatePersons.slice(0, 14).map((person) => (
-                <button
-                  key={person.person_id}
-                  type="button"
-                  className={`keyword-chip keyword-chip--${person.status}`}
-                  onClick={() => {
-                    setCandidateEntityFilter("primary");
-                    setCandidateReviewIndex(
-                      Math.max(
-                        (candidates?.persons ?? [])
-                          .filter((candidate) => isPrimaryEntityType(candidate.entity_type))
-                          .findIndex((candidate) => candidate.person_id === person.person_id),
-                        0
-                      )
-                    );
-                  }}
-                >
-                  <span>{person.display_name}</span>
-                  <small>{person.status === "accepted" ? `${person.accepted_mention_comment_count}件` : "除外"}</small>
-                </button>
-              ))}
-              {decidedPrimaryCandidatePersons.length > 14 ? <span className="keyword-chip keyword-chip--more">+{decidedPrimaryCandidatePersons.length - 14}</span> : null}
-            </div>
           </div>
           <div className="filter-bar">
             <label>
@@ -1623,6 +1641,61 @@ export default function App() {
             ))}
             {!visibleCandidatePersons.length ? <p className="empty-note">この表示範囲に該当する候補はありません。</p> : null}
           </div>
+          <div className="review-summary review-summary--below" aria-live="polite">
+            <span>候補 {candidateSummary.total} 件</span>
+            <strong>採用 {candidateSummary.accepted} 件</strong>
+            <button type="button" className="review-summary__pending" onClick={() => setCandidateEntityFilter("needs_review")}>
+              保留 {candidateSummary.pending} 件
+              {candidateSummary.pendingNonPrimary ? <small>人物外 {candidateSummary.pendingNonPrimary}</small> : null}
+            </button>
+            <span>除外 {candidateSummary.rejected} 件</span>
+            <span>人物外候補 {candidateSummary.nonPrimary} 件</span>
+            {lastAction ? <em>{lastAction}</em> : null}
+          </div>
+          {pendingPrimaryCandidatePersons.length ? (
+            <div className="pending-candidates" aria-label="保留中の人物候補">
+              <div>
+                <span className="label">保留中</span>
+                <strong>{candidateSummary.pendingPrimary} 件</strong>
+              </div>
+              <div className="pending-candidates__list">
+                {pendingPrimaryCandidatePersons.slice(0, 18).map((person) => (
+                  <button
+                    key={person.person_id}
+                    type="button"
+                    className="keyword-chip keyword-chip--pending"
+                    onClick={() => jumpToCandidate(person.person_id, "primary")}
+                  >
+                    <span>{person.display_name}</span>
+                    <small>{person.accepted_mention_comment_count}件</small>
+                  </button>
+                ))}
+                {pendingPrimaryCandidatePersons.length > 18 ? (
+                  <span className="keyword-chip keyword-chip--more">+{pendingPrimaryCandidatePersons.length - 18}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <div className="accepted-keywords" aria-label="決定済み候補">
+            <div>
+              <span className="label">決定済み</span>
+              <strong>採用 {candidateSummary.accepted} / 除外 {candidateSummary.rejected}</strong>
+            </div>
+            <div className="accepted-keywords__list">
+              {decidedPrimaryCandidatePersons.slice(0, 14).map((person) => (
+                <button
+                  key={person.person_id}
+                  type="button"
+                  className={`keyword-chip keyword-chip--${person.status}`}
+                  onClick={() => jumpToCandidate(person.person_id, "primary")}
+                >
+                  <span>{person.display_name}</span>
+                  <small>{person.status === "accepted" ? `${person.accepted_mention_comment_count}件` : "除外"}</small>
+                </button>
+              ))}
+              {decidedPrimaryCandidatePersons.length > 14 ? <span className="keyword-chip keyword-chip--more">+{decidedPrimaryCandidatePersons.length - 14}</span> : null}
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -1689,7 +1762,9 @@ export default function App() {
               </div>
               {report.rankings.mention_ranking.slice(0, 10).map((row) => (
                 <div className="mention-bar" key={row.person_id}>
-                  <span>{row.display_name}</span>
+                  <button type="button" className="mention-bar__name" onClick={() => openPersonComments(row.person_id)}>
+                    {row.display_name}
+                  </button>
                   <div>
                     <i style={{ width: `${Math.max((row.mention_comment_count / (dashboardStats?.maxMentionCount ?? 1)) * 100, 4)}%` }} />
                   </div>
@@ -1756,7 +1831,11 @@ export default function App() {
                 <article className="ranking-row" key={row.person_id}>
                   <span className="rank-number">{index + 1}</span>
                   <div>
-                    <h3>{row.display_name}</h3>
+                    <h3>
+                      <button type="button" className="link-button" onClick={() => openPersonComments(row.person_id)}>
+                        {row.display_name}
+                      </button>
+                    </h3>
                     <p>
                       全体 {row.mention_comment_count}件 / 上位コメント内 {row.top_comment_mention_count}件 / 単独{" "}
                       {row.single_mention_count}件 / 同時言及 {row.multi_mention_count}件
@@ -2232,6 +2311,53 @@ export default function App() {
         </section>
       ) : null}
 
+      {report && selectedDetailPerson && activeTab === "personComments" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>人物コメント</h2>
+              <p>人物別言及数から選んだ人物のコメントだけをページングして確認します。</p>
+              <AnalysisHelp>
+                ランキングで気になった人物について、該当コメントだけを読みます。100 件または 200 件ずつ DB から取得するので、
+                大きな run でも画面を軽く保てます。
+              </AnalysisHelp>
+            </div>
+            <strong>{selectedDetailPerson.display_name}</strong>
+          </div>
+          <div className="person-comment-toolbar">
+            <label>
+              人物
+              <select
+                value={selectedDetailPerson.person_id}
+                onChange={(event) => {
+                  setSelectedDetailPersonId(event.target.value);
+                  setPersonCommentPage(0);
+                }}
+              >
+                {commentPersonOptions.map((person) => (
+                  <option key={person.person_id} value={person.person_id}>
+                    {person.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <PaginatedCommentList
+            pageData={personCommentsPageData}
+            page={personCommentPage}
+            pageSize={personCommentPageSize}
+            loading={commentsLoading}
+            busy={busy}
+            assignablePersons={assignablePersons}
+            commentPersonDrafts={commentPersonDrafts}
+            setCommentPersonDrafts={setCommentPersonDrafts}
+            updateCommentMention={updateCommentMention}
+            onPageChange={setPersonCommentPage}
+            onPageSizeChange={setPersonCommentPageSize}
+          />
+        </section>
+      ) : null}
+
       {report && activeTab === "comments" ? (
         <section className="panel">
           <div className="section-heading">
@@ -2243,7 +2369,7 @@ export default function App() {
                 必要に応じてコメント単位で人物紐づけを追加・解除できます。
               </AnalysisHelp>
             </div>
-            <strong>{filteredComments.length} / {report.comments.length} 件</strong>
+            <strong>{commentsPageData?.total ?? report.comments.length} / {report.comments.length} 件</strong>
           </div>
           <div className="comment-toolbar">
             <label>
@@ -2267,73 +2393,153 @@ export default function App() {
               </select>
             </label>
           </div>
-          <div className="comment-list">
-            {filteredComments.slice(0, 200).map((comment) => (
-              <article className="comment-row" key={comment.comment_id}>
-                <div className="comment-row__meta">
-                  <LikeCount count={comment.like_count} strong />
-                  {comment.is_reply ? <span className="reply-badge">返信</span> : null}
-                  <div className="mention-pills">
-                    {comment.mentioned_persons.length ? (
-                      comment.mentioned_persons.map((person) => (
-                        <span key={person.person_id}>
-                          {person.display_name}
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              updateCommentMention({
-                                type: "remove_mention",
-                                comment_id: comment.comment_id,
-                                person_id: person.person_id
-                              })
-                            }
-                          >
-                            外す
-                          </button>
-                        </span>
-                      ))
-                    ) : (
-                      <span className="mention-pills__empty">未紐づけ</span>
-                    )}
-                  </div>
-                </div>
-                <p>{comment.text_original}</p>
-                <div className="comment-assign">
-                  <select
-                    value={commentPersonDrafts[comment.comment_id] ?? ""}
-                    onChange={(event) =>
-                      setCommentPersonDrafts((drafts) => ({ ...drafts, [comment.comment_id]: event.target.value }))
-                    }
-                  >
-                    <option value="">人物を選択</option>
-                    {assignablePersons.map((person) => (
-                      <option key={person.person_id} value={person.person_id}>
-                        {person.display_name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={busy || !(commentPersonDrafts[comment.comment_id] ?? "")}
-                    onClick={() =>
-                      updateCommentMention({
-                        type: "add_mention",
-                        comment_id: comment.comment_id,
-                        person_id: commentPersonDrafts[comment.comment_id]
-                      })
-                    }
-                  >
-                    この人物に紐づけ
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-          {filteredComments.length > 200 ? <p className="list-note">先頭 200 件を表示しています。検索条件を追加してください。</p> : null}
+          <PaginatedCommentList
+            pageData={commentsPageData}
+            page={commentPage}
+            pageSize={commentPageSize}
+            loading={commentsLoading}
+            busy={busy}
+            assignablePersons={assignablePersons}
+            commentPersonDrafts={commentPersonDrafts}
+            setCommentPersonDrafts={setCommentPersonDrafts}
+            updateCommentMention={updateCommentMention}
+            onPageChange={setCommentPage}
+            onPageSizeChange={setCommentPageSize}
+          />
         </section>
       ) : null}
     </main>
+  );
+}
+
+function PaginatedCommentList({
+  pageData,
+  page,
+  pageSize,
+  loading,
+  busy,
+  assignablePersons,
+  commentPersonDrafts,
+  setCommentPersonDrafts,
+  updateCommentMention,
+  onPageChange,
+  onPageSizeChange
+}: {
+  pageData: CommentsPage | null;
+  page: number;
+  pageSize: number;
+  loading: boolean;
+  busy: boolean;
+  assignablePersons: Person[];
+  commentPersonDrafts: Record<string, string>;
+  setCommentPersonDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  updateCommentMention: (action: { type: "add_mention" | "remove_mention"; comment_id: string; person_id: string }) => void;
+  onPageChange: Dispatch<SetStateAction<number>>;
+  onPageSizeChange: Dispatch<SetStateAction<number>>;
+}) {
+  const total = pageData?.total ?? 0;
+  const pageCount = Math.max(Math.ceil(total / pageSize), 1);
+  const start = total ? page * pageSize + 1 : 0;
+  const end = Math.min((page + 1) * pageSize, total);
+  return (
+    <>
+      <div className="comment-pagination" aria-label="コメントページング">
+        <div>
+          <strong>
+            {start}-{end}
+          </strong>
+          <span>/ {total} 件</span>
+        </div>
+        <label>
+          表示件数
+          <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>
+            <option value={100}>100件</option>
+            <option value={200}>200件</option>
+          </select>
+        </label>
+        <div className="comment-pagination__actions">
+          <button type="button" className="choice-button" disabled={loading || page <= 0} onClick={() => onPageChange((value) => Math.max(value - 1, 0))}>
+            前へ
+          </button>
+          <span>
+            {Math.min(page + 1, pageCount)} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className="choice-button"
+            disabled={loading || page >= pageCount - 1}
+            onClick={() => onPageChange((value) => Math.min(value + 1, pageCount - 1))}
+          >
+            次へ
+          </button>
+        </div>
+      </div>
+      {loading ? <p className="list-note">コメントを取得しています。</p> : null}
+      <div className="comment-list">
+        {(pageData?.comments ?? []).map((comment) => (
+          <article className="comment-row" key={comment.comment_id}>
+            <div className="comment-row__meta">
+              <LikeCount count={comment.like_count} strong />
+              {comment.is_reply ? <span className="reply-badge">返信</span> : null}
+              <div className="mention-pills">
+                {comment.mentioned_persons.length ? (
+                  comment.mentioned_persons.map((person) => (
+                    <span key={person.person_id}>
+                      {person.display_name}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          updateCommentMention({
+                            type: "remove_mention",
+                            comment_id: comment.comment_id,
+                            person_id: person.person_id
+                          })
+                        }
+                      >
+                        外す
+                      </button>
+                    </span>
+                  ))
+                ) : (
+                  <span className="mention-pills__empty">未紐づけ</span>
+                )}
+              </div>
+            </div>
+            <p>{comment.text_original}</p>
+            <div className="comment-assign">
+              <select
+                value={commentPersonDrafts[comment.comment_id] ?? ""}
+                onChange={(event) =>
+                  setCommentPersonDrafts((drafts) => ({ ...drafts, [comment.comment_id]: event.target.value }))
+                }
+              >
+                <option value="">人物を選択</option>
+                {assignablePersons.map((person) => (
+                  <option key={person.person_id} value={person.person_id}>
+                    {person.display_name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={busy || !(commentPersonDrafts[comment.comment_id] ?? "")}
+                onClick={() =>
+                  updateCommentMention({
+                    type: "add_mention",
+                    comment_id: comment.comment_id,
+                    person_id: commentPersonDrafts[comment.comment_id]
+                  })
+                }
+              >
+                この人物に紐づけ
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+      {!loading && pageData && !pageData.comments.length ? <p className="list-note">該当するコメントはありません。</p> : null}
+    </>
   );
 }
 
@@ -2353,7 +2559,7 @@ function FrequentAliasColumn({
   assignablePersons: Person[];
   aliasSuggestionDrafts: Record<string, string>;
   setAliasSuggestionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
-  acceptAliasSuggestion: (suggestion: AliasSuggestion) => void;
+  acceptAliasSuggestion: (suggestion: AliasSuggestion, selectedPersonId?: string) => void;
   setAliasReviewState: (suggestion: AliasSuggestion, reviewState: AliasReviewState) => void;
 }) {
   return (
@@ -2361,62 +2567,62 @@ function FrequentAliasColumn({
       <h3>{title}</h3>
       <p>{title === "alias 候補" ? "人物への紐づけ候補です。" : "人物名か一般語かを確認します。"}</p>
       {items.length ? (
-        items.map(({ suggestion, reviewState }) => (
-          <article className="alias-suggestion-card" key={suggestion.normalized_alias}>
-            <div>
-              <h4>{suggestion.token}</h4>
-              <p>{suggestion.reason}</p>
-              <strong>{suggestion.hit_count} 件</strong>
-              <span className={`status status-${reviewState}`}>{aliasReviewStateLabel(reviewState)}</span>
-            </div>
-            <label>
-              紐づけ先
-              <select
-                value={aliasSuggestionDrafts[suggestion.normalized_alias] ?? suggestion.suggested_person_id ?? ""}
-                onChange={(event) =>
-                  setAliasSuggestionDrafts((drafts) => ({
-                    ...drafts,
-                    [suggestion.normalized_alias]: event.target.value
-                  }))
-                }
-              >
-                <option value="">人物を選択</option>
-                {assignablePersons.map((person) => (
-                  <option key={person.person_id} value={person.person_id}>
-                    {person.display_name}
-                  </option>
+        items.map(({ suggestion, reviewState }) => {
+          const optionPersons = sortedAliasPersonOptions(suggestion, assignablePersons);
+          const selectedPersonId = aliasSuggestionDrafts[suggestion.normalized_alias] ?? bestAliasPersonId(suggestion, optionPersons) ?? "";
+          return (
+            <article className="alias-suggestion-card" key={suggestion.normalized_alias}>
+              <div>
+                <h4>{suggestion.token}</h4>
+                <p>{suggestion.reason}</p>
+                <strong>{suggestion.hit_count} 件</strong>
+                <span className={`status status-${reviewState}`}>{aliasReviewStateLabel(reviewState)}</span>
+              </div>
+              <label>
+                紐づけ先
+                <select
+                  value={selectedPersonId}
+                  onChange={(event) =>
+                    setAliasSuggestionDrafts((drafts) => ({
+                      ...drafts,
+                      [suggestion.normalized_alias]: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">人物を選択</option>
+                  {optionPersons.map((person) => (
+                    <option key={person.person_id} value={person.person_id}>
+                      {person.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="candidate-actions">
+                <button type="button" disabled={busy || !selectedPersonId} onClick={() => acceptAliasSuggestion(suggestion, selectedPersonId)}>
+                  alias に追加
+                </button>
+                <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "needs_review")}>
+                  保留
+                </button>
+                <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "common_word")}>
+                  一般語として除外
+                </button>
+              </div>
+              <details className="alias-evidence">
+                <summary>代表コメント</summary>
+                {suggestion.representative_comments.map((comment) => (
+                  <blockquote key={comment.comment_id}>
+                    {comment.text_original}
+                    <span className="alias-evidence-meta">
+                      <LikeCount count={comment.like_count} />
+                      {comment.is_reply ? " / 返信" : ""}
+                    </span>
+                  </blockquote>
                 ))}
-              </select>
-            </label>
-            <div className="candidate-actions">
-              <button
-                type="button"
-                disabled={busy || !(aliasSuggestionDrafts[suggestion.normalized_alias] || suggestion.suggested_person_id)}
-                onClick={() => acceptAliasSuggestion(suggestion)}
-              >
-                alias に追加
-              </button>
-              <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "needs_review")}>
-                保留
-              </button>
-              <button type="button" disabled={busy} onClick={() => setAliasReviewState(suggestion, "common_word")}>
-                一般語として除外
-              </button>
-            </div>
-            <details className="alias-evidence">
-              <summary>代表コメント</summary>
-              {suggestion.representative_comments.map((comment) => (
-                <blockquote key={comment.comment_id}>
-                  {comment.text_original}
-                  <span className="alias-evidence-meta">
-                    <LikeCount count={comment.like_count} />
-                    {comment.is_reply ? " / 返信" : ""}
-                  </span>
-                </blockquote>
-              ))}
-            </details>
-          </article>
-        ))
+              </details>
+            </article>
+          );
+        })
       ) : (
         <p className="list-note">該当する表記はありません。</p>
       )}
@@ -2504,7 +2710,7 @@ function filterCandidatePersons(persons: Person[], filter: CandidateEntityFilter
   if (filter === "needs_review") {
     return persons.filter((person) => isPrimaryEntityType(person.entity_type) && isPendingCandidate(person));
   }
-  return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+  return persons.filter((person) => isPrimaryEntityType(person.entity_type));
 }
 
 function sortedCommentClusters(clusters: CommentCluster[]): CommentCluster[] {
@@ -2518,6 +2724,45 @@ function sortedCommentClusters(clusters: CommentCluster[]): CommentCluster[] {
 function needsCandidateReview(person: Person): boolean {
   if (person.status === "rejected") return false;
   return person.status !== "accepted" || person.aliases.some((alias) => alias.status !== "accepted");
+}
+
+function sortedAliasPersonOptions(suggestion: AliasSuggestion, persons: Person[]): Person[] {
+  return [...persons].sort((a, b) => {
+    const scoreDelta = aliasPersonScore(suggestion, b) - aliasPersonScore(suggestion, a);
+    if (scoreDelta !== 0) return scoreDelta;
+    return b.accepted_mention_comment_count - a.accepted_mention_comment_count;
+  });
+}
+
+function bestAliasPersonId(suggestion: AliasSuggestion, persons: Person[]): string | null {
+  if (suggestion.suggested_person_id && persons.some((person) => person.person_id === suggestion.suggested_person_id)) {
+    return suggestion.suggested_person_id;
+  }
+  const best = persons[0];
+  return best && aliasPersonScore(suggestion, best) >= 3 ? best.person_id : null;
+}
+
+function aliasPersonScore(suggestion: AliasSuggestion, person: Person): number {
+  const token = normalizeSearch(suggestion.normalized_alias || suggestion.token);
+  const name = normalizeSearch(person.display_name);
+  if (!token || !name) return 0;
+  if (suggestion.suggested_person_id === person.person_id) return 100;
+  if (token === name) return 80;
+  if (name.includes(token) || token.includes(name)) return 50;
+  const aliasHit = person.aliases.some((alias) => {
+    const aliasText = normalizeSearch(alias.normalized_alias || alias.alias_text);
+    return aliasText === token || aliasText.includes(token) || token.includes(aliasText);
+  });
+  if (aliasHit) return 40;
+  return commonPrefixLength(token, name);
+}
+
+function commonPrefixLength(a: string, b: string): number {
+  let length = 0;
+  while (length < a.length && length < b.length && a[length] === b[length]) {
+    length += 1;
+  }
+  return length;
 }
 
 function shouldAdvanceCandidateCard(actionType: string): boolean {

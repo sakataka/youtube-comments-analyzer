@@ -954,6 +954,92 @@ class AnalysisStore:
             self.persist_report(run_id, report)
         return report
 
+    def get_comments_page(
+        self,
+        run_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        person_id: str | None = None,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        run = self.get_run_row(run_id)
+        where = ["c.comment_snapshot_id = ?"]
+        params: list[Any] = [run["comment_snapshot_id"]]
+        query = normalize_text((search or "").strip())
+        if query:
+            where.append("c.text_normalized like ?")
+            params.append(f"%{query}%")
+        if person_id == "unassigned":
+            where.append(
+                """
+                not exists (
+                  select 1 from comment_mentions m
+                  where m.analysis_run_id = ? and m.comment_id = c.id
+                )
+                """
+            )
+            params.append(run_id)
+        elif person_id:
+            where.append(
+                """
+                exists (
+                  select 1 from comment_mentions m
+                  where m.analysis_run_id = ? and m.comment_id = c.id and m.person_id = ?
+                )
+                """
+            )
+            params.extend([run_id, person_id])
+        where_sql = " and ".join(where)
+        total = self.conn.execute(f"select count(*) as count from comments c where {where_sql}", params).fetchone()["count"]
+        rows = self.conn.execute(
+            f"""
+            select c.*
+            from comments c
+            where {where_sql}
+            order by c.source_order asc
+            limit ? offset ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+        comment_ids = [row["id"] for row in rows]
+        mentions_by_comment: dict[str, list[dict[str, Any]]] = {comment_id: [] for comment_id in comment_ids}
+        if comment_ids:
+            placeholders = ",".join("?" for _ in comment_ids)
+            mention_rows = self.conn.execute(
+                f"""
+                select m.comment_id, m.person_id, p.display_name, m.confidence, m.match_method
+                from comment_mentions m
+                join persons p on p.id = m.person_id
+                where m.analysis_run_id = ? and m.comment_id in ({placeholders})
+                order by p.display_name asc
+                """,
+                [run_id, *comment_ids],
+            ).fetchall()
+            for mention in mention_rows:
+                mentions_by_comment.setdefault(mention["comment_id"], []).append({
+                    "person_id": mention["person_id"],
+                    "display_name": mention["display_name"],
+                    "confidence": mention["confidence"],
+                    "match_method": mention["match_method"],
+                })
+        return {
+            "run_id": run_id,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "comments": [
+                {
+                    "comment_id": comment["id"],
+                    "text_original": comment["text_original"],
+                    "like_count": comment["like_count"],
+                    "is_reply": bool(comment["is_reply"]),
+                    "parent_comment_id": comment["parent_comment_id"],
+                    "mentioned_persons": mentions_by_comment.get(comment["id"], []),
+                }
+                for comment in rows
+            ],
+        }
+
     def persist_report(self, run_id: str, report: dict[str, Any]) -> None:
         self.conn.execute(
             "insert into reports values (?, ?, ?, ?)",

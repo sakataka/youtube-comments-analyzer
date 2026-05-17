@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -259,6 +259,20 @@ def llm_assist(run_id: str) -> dict[str, Any]:
 def get_report(run_id: str) -> dict[str, Any]:
     try:
         return store.get_latest_report(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/{run_id}/comments")
+def get_comments(
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    person_id: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+) -> dict[str, Any]:
+    try:
+        return store.get_comments_page(run_id, limit=limit, offset=offset, person_id=person_id, search=search)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

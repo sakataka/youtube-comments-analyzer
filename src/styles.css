@@ -1363,11 +1363,27 @@ h4 {
   grid-template-columns: minmax(88px, 150px) minmax(0, 1fr) 42px;
 }
 
-.mention-bar span {
+.mention-bar span,
+.mention-bar__name {
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mention-bar__name,
+.link-button {
+  background: transparent;
+  color: #154c9f;
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.mention-bar__name:hover,
+.link-button:hover {
+  text-decoration: underline;
 }
 
 .mention-bar div {
@@ -1838,11 +1854,48 @@ blockquote {
   color: #697789;
 }
 
-.comment-toolbar {
+.comment-toolbar,
+.person-comment-toolbar {
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) 260px;
   margin-bottom: 16px;
+}
+
+.person-comment-toolbar {
+  grid-template-columns: minmax(220px, 360px);
+}
+
+.comment-pagination {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(120px, 1fr) 150px auto;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+}
+
+.comment-pagination > div:first-child {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+}
+
+.comment-pagination > div:first-child span,
+.comment-pagination__actions span {
+  color: #647181;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.comment-pagination__actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: end;
 }
 
 .comment-list {
@@ -1942,6 +1995,8 @@ blockquote {
   .report-layout,
   .detail-layout,
   .comment-toolbar,
+  .person-comment-toolbar,
+  .comment-pagination,
   .comment-assign,
   .filter-bar,
   .history-card {
