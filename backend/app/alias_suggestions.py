@@ -10,7 +10,9 @@ from .text import normalize_alias
 from .text_filters import is_noise_keyword, person_alias_terms
 
 
-NICKNAME_TOKEN_RE = re.compile(r"[ァ-ヶー]{3,12}|[ぁ-んー]{3,12}|[一-龥々]{2,6}(?:ちゃん|さん|くん|君)")
+NICKNAME_TOKEN_RE = re.compile(
+    r"[一-龥々]{2,6}(?:ちゃん|さん|くん|君)|[ァ-ヶー]{2,12}(?:ちゃん|さん|くん|君)"
+)
 SUGGESTION_STOPWORDS = {
     "それぞれ",
     "みんな",
@@ -101,9 +103,13 @@ def extract_nickname_like_tokens(text: str) -> list[str]:
     output: list[str] = []
     output.extend(person_alias_terms(text))
     for match in NICKNAME_TOKEN_RE.finditer(text):
-        token = match.group(0).strip()
+        full_token = match.group(0).strip()
+        token = full_token
         token = re.sub(r"(さん|ちゃん|くん|君)$", "", token)
         token = re.sub(r"[はがもにをでとの]$", "", token)
+        trusted_terms = {normalize_alias(term) for term in person_alias_terms(full_token)}
+        if trusted_terms and normalize_alias(token) not in trusted_terms:
+            continue
         if token:
             output.append(token)
     return output

@@ -1,4 +1,4 @@
-import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useState } from "react";
+import { Dispatch, FormEvent, Fragment, ReactNode, SetStateAction, useEffect, useMemo, useState } from "react";
 
 type RunState = {
   run_id: string;
@@ -384,23 +384,20 @@ export default function App() {
 
   const candidateSummary = useMemo(() => {
     const persons = candidates?.persons ?? [];
+    const primaryPersons = persons.filter((person) => isPrimaryEntityType(person.entity_type));
     return {
       accepted: persons.filter((person) => person.status === "accepted").length,
       rejected: persons.filter((person) => person.status === "rejected").length,
       pending: persons.filter((person) => person.status !== "accepted" && person.status !== "rejected").length,
+      pendingPrimary: primaryPersons.filter(isPendingCandidate).length,
+      pendingNonPrimary: persons.filter((person) => !isPrimaryEntityType(person.entity_type) && isPendingCandidate(person)).length,
       total: persons.length,
       nonPrimary: persons.filter((person) => !isPrimaryEntityType(person.entity_type)).length
     };
   }, [candidates]);
 
   const visibleCandidatePersons = useMemo(() => {
-    const persons = candidates?.persons ?? [];
-    if (candidateEntityFilter === "all") return persons;
-    if (candidateEntityFilter === "non_primary") return persons.filter((person) => !isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
-    if (candidateEntityFilter === "needs_review") {
-      return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
-    }
-    return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+    return filterCandidatePersons(candidates?.persons ?? [], candidateEntityFilter);
   }, [candidateEntityFilter, candidates]);
 
   const decidedPrimaryCandidatePersons = useMemo(() => {
@@ -412,7 +409,16 @@ export default function App() {
       });
   }, [candidates]);
 
+  const pendingPrimaryCandidatePersons = useMemo(() => {
+    return (candidates?.persons ?? [])
+      .filter((person) => isPrimaryEntityType(person.entity_type) && isPendingCandidate(person))
+      .sort((a, b) => b.accepted_mention_comment_count - a.accepted_mention_comment_count);
+  }, [candidates]);
+
   const currentCandidatePerson = visibleCandidatePersons[candidateReviewIndex] ?? null;
+  const pendingQueueIndex = currentCandidatePerson
+    ? pendingPrimaryCandidatePersons.findIndex((person) => person.person_id === currentCandidatePerson.person_id)
+    : -1;
 
   const commentPersonOptions = useMemo(() => {
     return report?.rankings.mention_ranking.map((row) => ({ person_id: row.person_id, display_name: row.display_name })) ?? [];
@@ -691,6 +697,25 @@ export default function App() {
       setBusy(false);
       setUpdatingId(null);
     }
+  }
+
+  function jumpToCandidate(personId: string, filter: CandidateEntityFilter = "primary") {
+    const persons = candidates?.persons ?? [];
+    const nextVisiblePersons = filterCandidatePersons(persons, filter);
+    const nextIndex = nextVisiblePersons.findIndex((person) => person.person_id === personId);
+    setCandidateEntityFilter(filter);
+    setCandidateReviewIndex(Math.max(nextIndex, 0));
+  }
+
+  function jumpPendingCandidate(direction: "previous" | "next") {
+    if (!pendingPrimaryCandidatePersons.length) return;
+    const fallbackIndex = direction === "previous" ? pendingPrimaryCandidatePersons.length - 1 : 0;
+    const currentIndex = pendingQueueIndex >= 0 ? pendingQueueIndex : fallbackIndex;
+    const nextIndex =
+      direction === "previous"
+        ? (currentIndex - 1 + pendingPrimaryCandidatePersons.length) % pendingPrimaryCandidatePersons.length
+        : (currentIndex + 1) % pendingPrimaryCandidatePersons.length;
+    jumpToCandidate(pendingPrimaryCandidatePersons[nextIndex].person_id, "primary");
   }
 
   async function updateDisplayName(person: Person) {
@@ -1296,11 +1321,38 @@ export default function App() {
           <div className="review-summary" aria-live="polite">
             <span>候補 {candidateSummary.total} 件</span>
             <strong>採用 {candidateSummary.accepted} 件</strong>
-            <span>保留 {candidateSummary.pending} 件</span>
+            <button type="button" className="review-summary__pending" onClick={() => setCandidateEntityFilter("needs_review")}>
+              保留 {candidateSummary.pending} 件
+              {candidateSummary.pendingNonPrimary ? <small>人物外 {candidateSummary.pendingNonPrimary}</small> : null}
+            </button>
             <span>除外 {candidateSummary.rejected} 件</span>
             <span>人物外候補 {candidateSummary.nonPrimary} 件</span>
             {lastAction ? <em>{lastAction}</em> : null}
           </div>
+          {pendingPrimaryCandidatePersons.length ? (
+            <div className="pending-candidates" aria-label="保留中の人物候補">
+              <div>
+                <span className="label">保留中</span>
+                <strong>{candidateSummary.pendingPrimary} 件</strong>
+              </div>
+              <div className="pending-candidates__list">
+                {pendingPrimaryCandidatePersons.slice(0, 18).map((person) => (
+                  <button
+                    key={person.person_id}
+                    type="button"
+                    className="keyword-chip keyword-chip--pending"
+                    onClick={() => jumpToCandidate(person.person_id, "primary")}
+                  >
+                    <span>{person.display_name}</span>
+                    <small>{person.accepted_mention_comment_count}件</small>
+                  </button>
+                ))}
+                {pendingPrimaryCandidatePersons.length > 18 ? (
+                  <span className="keyword-chip keyword-chip--more">+{pendingPrimaryCandidatePersons.length - 18}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div className="accepted-keywords" aria-label="決定済み候補">
             <div>
               <span className="label">決定済み</span>
@@ -1349,9 +1401,35 @@ export default function App() {
               <strong>
                 {visibleCandidatePersons.length ? `${candidateReviewIndex + 1} / ${visibleCandidatePersons.length}` : "0 / 0"}
               </strong>
-              <small>採用または除外すると、この表示範囲の次のカードに進みます。</small>
+              <small>
+                {candidateEntityFilter === "needs_review"
+                  ? "保留中の人物候補だけを移動します。"
+                  : "採用または除外すると、この表示範囲の次のカードに進みます。"}
+              </small>
             </div>
             <div className="candidate-deck__actions">
+              <button
+                type="button"
+                className="choice-button"
+                disabled={!pendingPrimaryCandidatePersons.length}
+                onClick={() => jumpPendingCandidate("previous")}
+              >
+                前の保留
+              </button>
+              <button
+                type="button"
+                className="choice-button choice-button--pending"
+                disabled={!pendingPrimaryCandidatePersons.length}
+                onClick={() => {
+                  if (pendingQueueIndex >= 0) {
+                    jumpPendingCandidate("next");
+                    return;
+                  }
+                  jumpToCandidate(pendingPrimaryCandidatePersons[0].person_id, "primary");
+                }}
+              >
+                次の保留
+              </button>
               <button
                 type="button"
                 className="choice-button"
@@ -2071,22 +2149,35 @@ export default function App() {
             </div>
             <aside className="cooccurrence-matrix">
               <h3>ヒートマップ</h3>
-              {report.cooccurrence.matrix.slice(0, 8).map((row) => (
-                <div className="matrix-row" key={row.source}>
-                  <strong>{row.source}</strong>
-                  <div>
-                    {row.targets.slice(0, 8).map((target) => (
-                      <span
-                        key={`${row.source}-${target.target}`}
-                        title={`${row.source} × ${target.target}: ${target.count}`}
-                        style={{ opacity: target.count ? Math.min(1, 0.25 + target.count / 20) : 0.18 }}
-                      >
-                        {target.count}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
+              <p>左の人物と上の人物が、同じコメント内で一緒に出た件数です。</p>
+              <div className="matrix-table" style={{ "--matrix-size": Math.min(report.cooccurrence.matrix.length, 8) } as React.CSSProperties}>
+                <span className="matrix-corner">人物</span>
+                {report.cooccurrence.matrix.slice(0, 8).map((row) => (
+                  <strong className="matrix-column-label" key={`column-${row.source}`} title={row.source}>
+                    {row.source}
+                  </strong>
+                ))}
+                {report.cooccurrence.matrix.slice(0, 8).map((row) => (
+                  <Fragment key={row.source}>
+                    <strong className="matrix-row-label" title={row.source}>
+                      {row.source}
+                    </strong>
+                    {row.targets.slice(0, 8).map((target) => {
+                      const isSelf = row.source === target.target;
+                      return (
+                        <span
+                          className={isSelf ? "matrix-cell matrix-cell--self" : "matrix-cell"}
+                          key={`${row.source}-${target.target}`}
+                          title={`${row.source} × ${target.target}: ${target.count} 件`}
+                          style={{ opacity: isSelf ? 1 : target.count ? Math.min(1, 0.28 + target.count / 20) : 0.2 }}
+                        >
+                          {isSelf ? "ー" : target.count}
+                        </span>
+                      );
+                    })}
+                  </Fragment>
+                ))}
+              </div>
             </aside>
           </div>
         </section>
@@ -2108,7 +2199,7 @@ export default function App() {
             <strong>{report.clusters.clusters.length} 件</strong>
           </div>
           <div className="cluster-grid">
-            {report.clusters.clusters.map((cluster) => (
+            {sortedCommentClusters(report.clusters.clusters).map((cluster) => (
               <article className="cluster-card" key={cluster.cluster_id}>
                 <div className="cluster-card__header">
                   <div>
@@ -2403,7 +2494,29 @@ function isPrimaryEntityType(entityType: string): boolean {
   return ["person", "group", "duo"].includes(entityType);
 }
 
+function isPendingCandidate(person: Person): boolean {
+  return person.status !== "accepted" && person.status !== "rejected";
+}
+
+function filterCandidatePersons(persons: Person[], filter: CandidateEntityFilter): Person[] {
+  if (filter === "all") return persons;
+  if (filter === "non_primary") return persons.filter((person) => !isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+  if (filter === "needs_review") {
+    return persons.filter((person) => isPrimaryEntityType(person.entity_type) && isPendingCandidate(person));
+  }
+  return persons.filter((person) => isPrimaryEntityType(person.entity_type) && needsCandidateReview(person));
+}
+
+function sortedCommentClusters(clusters: CommentCluster[]): CommentCluster[] {
+  return [...clusters].sort((a, b) => {
+    if (a.cluster_id === "other" && b.cluster_id !== "other") return 1;
+    if (a.cluster_id !== "other" && b.cluster_id === "other") return -1;
+    return b.comment_count - a.comment_count;
+  });
+}
+
 function needsCandidateReview(person: Person): boolean {
+  if (person.status === "rejected") return false;
   return person.status !== "accepted" || person.aliases.some((alias) => alias.status !== "accepted");
 }
 

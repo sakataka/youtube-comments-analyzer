@@ -649,14 +649,17 @@ h4 {
 
 .review-summary span,
 .review-summary strong,
-.review-summary em {
+.review-summary em,
+.review-summary__pending {
   background: #fff;
   border: 1px solid #dce5ef;
   border-radius: 999px;
+  color: inherit;
   display: inline-flex;
   font-size: 13px;
   font-style: normal;
   font-weight: 800;
+  gap: 6px;
   padding: 5px 10px;
 }
 
@@ -670,6 +673,50 @@ h4 {
   background: #e8f1ff;
   border-color: #bfd6ff;
   color: #154c9f;
+}
+
+.review-summary__pending {
+  background: #fff2d9;
+  border-color: #e7b75c;
+  color: #80500a;
+}
+
+.review-summary__pending small {
+  color: #9a6a1b;
+  font-size: 11px;
+}
+
+.pending-candidates {
+  align-items: start;
+  background: #fff8ea;
+  border: 1px solid #e9c06a;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 130px minmax(0, 1fr);
+  margin: 0 0 14px;
+  padding: 12px;
+}
+
+.pending-candidates .label {
+  color: #86560d;
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pending-candidates strong {
+  color: #3b2a0f;
+  display: block;
+  font-size: 22px;
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+.pending-candidates__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .accepted-keywords {
@@ -736,6 +783,17 @@ h4 {
 .keyword-chip--rejected small {
   background: #e8edf5;
   color: #5c6876;
+}
+
+.keyword-chip--pending {
+  background: #fff;
+  border-color: #e4b555;
+  color: #4a310c;
+}
+
+.keyword-chip--pending small {
+  background: #f6dfaa;
+  color: #7a510c;
 }
 
 .keyword-chip--more {
@@ -839,6 +897,7 @@ h4 {
 
 .candidate-deck__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1587,23 +1646,45 @@ h4 {
   padding: 12px;
 }
 
-.matrix-row {
-  display: grid;
-  gap: 6px;
-}
-
-.matrix-row strong {
-  color: #435264;
+.cooccurrence-matrix p {
+  color: #647181;
   font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
 }
 
-.matrix-row div {
+.matrix-table {
   display: grid;
   gap: 4px;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: minmax(72px, 1.2fr) repeat(var(--matrix-size), minmax(34px, 1fr));
+  overflow-x: auto;
 }
 
-.matrix-row span {
+.matrix-corner,
+.matrix-column-label,
+.matrix-row-label {
+  color: #435264;
+  font-size: 11px;
+  font-weight: 900;
+  min-width: 0;
+}
+
+.matrix-column-label {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+
+.matrix-row-label {
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-cell {
   align-items: center;
   background: #175ddc;
   border-radius: 4px;
@@ -1615,6 +1696,11 @@ h4 {
   justify-content: center;
 }
 
+.matrix-cell--self {
+  background: #e5ebf3;
+  color: #6c7786;
+}
+
 .cluster-grid {
   display: grid;
   gap: 12px;
@@ -1622,6 +1708,7 @@ h4 {
 }
 
 .cluster-card {
+  align-content: start;
   background: #fbfcfe;
   border: 1px solid #dfe6ef;
   border-radius: 8px;
@@ -1652,6 +1739,8 @@ h4 {
 
 .cluster-pills,
 .cluster-keywords {
+  align-content: start;
+  align-items: flex-start;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -1659,10 +1748,14 @@ h4 {
 
 .cluster-pills span,
 .cluster-keywords span {
+  display: inline-flex;
+  line-height: 1.2;
+  max-width: 100%;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
   padding: 5px 8px;
+  white-space: nowrap;
 }
 
 .cluster-pills span {

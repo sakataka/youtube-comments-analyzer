@@ -5,11 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.app.alias_suggestions import extract_nickname_like_tokens
 from backend.app.candidate_extraction import build_candidate_seeds, extract_candidate_tokens, extract_description_person_list_tokens
 from backend.app.llm_assist import extract_completed_agent_text, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
-from backend.app.report_builder import person_feature_words
+from backend.app.report_builder import build_comment_clusters, person_feature_words
 from backend.app.text_filters import evaluation_terms, is_noise_keyword, keyword_tokens, person_alias_terms
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
@@ -96,6 +97,14 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("ねんねん", tokens)
         self.assertNotIn("くれたねんねんちゃん", tokens)
         self.assertNotIn("たねんねんちゃん", tokens)
+        self.assertNotIn("そしてねんねんちゃん", extract_candidate_tokens("そしてねんねんちゃんがよかった"))
+
+    def test_alias_suggestion_tokens_skip_prefixed_hiragana_honorific_nickname(self):
+        tokens = extract_nickname_like_tokens("説明してくれたねんねんさんがすごい")
+        self.assertIn("ねんねん", tokens)
+        self.assertNotIn("てくれたねんねん", tokens)
+        self.assertNotIn("くれたねんねん", tokens)
+        self.assertNotIn("そしてねんねんちゃん", extract_nickname_like_tokens("そしてねんねんちゃんがすごい"))
 
     def test_description_guest_list_is_strong_person_context(self):
         description = """説明文です。
@@ -523,6 +532,8 @@ class PipelineTest(unittest.TestCase):
             suggestions = {suggestion["token"]: suggestion for suggestion in report["alias_suggestions"]}
 
             self.assertIn("ミッタン", suggestions)
+            self.assertNotIn("います", suggestions)
+            self.assertNotIn("という", suggestions)
             self.assertNotIn("ですよ", suggestions)
             self.assertNotIn("でした", suggestions)
             self.assertNotIn("してる", suggestions)
@@ -536,6 +547,16 @@ class PipelineTest(unittest.TestCase):
             self.assertNotIn("ですよ", cluster_terms)
             self.assertNotIn("でした", cluster_terms)
             self.assertNotIn("してる", cluster_terms)
+
+    def test_comment_clusters_place_other_last(self):
+        comments = [
+            {"id": "c1", "text_original": "分類できない話題", "like_count": 10},
+            {"id": "c2", "text_original": "分類できない雑談", "like_count": 9},
+            {"id": "c3", "text_original": "掛け合いとツッコミが良い", "like_count": 1},
+        ]
+        clusters = build_comment_clusters(comments, {}, 2)["clusters"]
+        self.assertNotEqual(clusters[0]["cluster_id"], "other")
+        self.assertEqual(clusters[-1]["cluster_id"], "other")
 
     def test_llm_assist_prompt_and_cache_flow(self):
         class FakeLlmClient:

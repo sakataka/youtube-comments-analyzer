@@ -454,12 +454,16 @@ def build_comment_clusters(
                 for comment in sorted(bucket_comments, key=lambda item: int(item["like_count"]), reverse=True)[:4]
             ],
         })
-    clusters.sort(key=lambda cluster: cluster["comment_count"], reverse=True)
+    clusters.sort(key=cluster_display_sort_key)
     return {
         "method": "keyword_features",
         "requested_cluster_count": cluster_count,
         "clusters": clusters,
     }
+
+
+def cluster_display_sort_key(cluster: dict[str, Any]) -> tuple[int, int]:
+    return (1 if cluster["cluster_id"] == "other" else 0, -int(cluster["comment_count"]))
 
 
 def best_cluster_id(text: str) -> str:
@@ -474,7 +478,7 @@ def best_cluster_id(text: str) -> str:
 def top_cluster_persons(comments: list[Any], mentions_by_comment: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     counts: defaultdict[str, int] = defaultdict(int)
     for comment in comments:
-        for display_name in mentions_by_comment[comment["id"]].values():
+        for display_name in mentions_by_comment.get(comment["id"], {}).values():
             counts[display_name] += 1
     return [
         {"display_name": display_name, "count": count}

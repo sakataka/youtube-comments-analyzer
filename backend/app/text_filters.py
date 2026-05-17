@@ -285,7 +285,7 @@ def contains_prefixed_hiragana_honorific_nickname(tokens: list[JapaneseToken]) -
     previous = tokens[-2]
     if not previous.pos or previous.pos[0] != "名詞" or not re.fullmatch(r"[ぁ-んー]{2,8}", previous.surface):
         return False
-    return any(token.pos and token.pos[0] in {"動詞", "助動詞", "助詞"} for token in tokens[:-2])
+    return any(token.pos and token.pos[0] in {"動詞", "助動詞", "助詞", "接続詞", "副詞"} for token in tokens[:-2])
 
 
 def is_honorific_capture_noise(term: str) -> bool:
