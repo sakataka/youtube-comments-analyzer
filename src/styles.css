@@ -1,4 +1,17 @@
 :root {
+  --page-max-width: 1180px;
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 18px;
+  --space-5: 24px;
+  --space-6: 34px;
+  --text-muted: #647181;
+  --text-subtle: #758295;
+  --line-soft: #dce3ec;
+  --surface: #fff;
+  --surface-soft: #f8fafc;
+  --shadow-card: 0 18px 45px rgba(23, 32, 38, 0.1);
   color: #172026;
   background: #f6f8fb;
   font-family:
@@ -44,50 +57,60 @@ button + button {
 }
 
 .app-shell {
-  width: min(1240px, calc(100% - 32px));
+  width: min(var(--page-max-width), calc(100% - 32px));
   margin: 0 auto;
-  padding: 24px 0 56px;
+  padding: var(--space-5) 0 56px;
 }
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
-  gap: 22px;
+  grid-template-columns: minmax(300px, 400px) minmax(520px, 720px);
+  gap: var(--space-6);
   align-items: start;
-  padding: 20px 0 18px;
+  justify-content: center;
+  padding: var(--space-4) 0 var(--space-6);
+}
+
+.hero__intro {
+  padding-top: var(--space-2);
 }
 
 .hero h1 {
-  margin: 0 0 12px;
-  font-size: clamp(28px, 4vw, 46px);
-  line-height: 1.08;
+  margin: 0 0 var(--space-3);
+  font-size: clamp(28px, 2.8vw, 34px);
+  line-height: 1.12;
   letter-spacing: 0;
+}
+
+.hero h1 span {
+  display: block;
 }
 
 .hero p,
 .section-heading p,
 .candidate-card p,
 .ranking-row p {
-  color: #647181;
+  color: var(--text-muted);
   line-height: 1.7;
   margin: 0;
 }
 
 .start-form,
 .panel {
-  background: #fff;
-  border: 1px solid #dce3ec;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(23, 32, 38, 0.08);
+  box-shadow: var(--shadow-card);
 }
 
 .start-form {
   display: grid;
-  gap: 16px;
-  padding: 20px;
+  gap: var(--space-4);
+  padding: var(--space-5);
 }
 
 .start-form__url-field,
+.start-form__settings,
 .start-form__wide-field,
 .start-form__number-fields,
 .start-form .checkbox-label,
@@ -95,10 +118,32 @@ button + button {
   grid-column: 1 / -1;
 }
 
+.start-form__settings {
+  background: var(--surface-soft);
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.start-form__settings-title {
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.start-form button[type="submit"] {
+  justify-self: end;
+  min-height: 44px;
+  min-width: 240px;
+}
+
 .start-form__number-fields {
   align-items: start;
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -107,7 +152,7 @@ label {
   display: grid;
   font-size: 13px;
   font-weight: 700;
-  gap: 7px;
+  gap: var(--space-1);
 }
 
 input,
@@ -120,9 +165,9 @@ select {
 }
 
 .field-note {
-  color: #697789;
+  color: var(--text-subtle);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -139,8 +184,8 @@ select {
 }
 
 .checkbox-label small {
-  color: #697789;
-  font-weight: 600;
+  color: var(--text-subtle);
+  font-weight: 500;
   grid-column: 2;
   line-height: 1.45;
 }
@@ -148,6 +193,29 @@ select {
 .panel {
   margin-top: 18px;
   padding: 20px;
+}
+
+.utility-panels {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: var(--space-2);
+}
+
+.utility-panels .panel {
+  box-shadow: none;
+  margin-top: 0;
+  padding: 16px 18px;
+}
+
+.utility-panels h2 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.utility-panels summary p {
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .status-panel {
@@ -1770,6 +1838,7 @@ blockquote {
   .hero,
   .start-form,
   .start-form__number-fields,
+  .utility-panels,
   .status-panel,
   .dashboard-grid,
   .dashboard-charts,
@@ -1804,6 +1873,11 @@ blockquote {
   .history-panel summary {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .start-form button[type="submit"] {
+    justify-self: stretch;
+    min-width: 0;
   }
 
   .alias-list li {

@@ -898,8 +898,11 @@ export default function App() {
   return (
     <main className="app-shell">
       <section className="hero">
-        <div>
-          <h1>YouTube コメント人物言及分析</h1>
+        <div className="hero__intro">
+          <h1>
+            <span>YouTube コメント</span>
+            <span>人物言及分析</span>
+          </h1>
           <p>
             コメントを保存してから候補抽出、alias 確認、人物別ランキングまでをローカルで実行します。
             API キーなしでも fixture で検証できます。
@@ -910,43 +913,46 @@ export default function App() {
             YouTube URL
             <input value={url} onChange={(event) => setUrl(event.target.value)} />
           </label>
-          <div className="start-form__number-fields">
-            <label>
-              最大コメント数
-              <input
-                type="number"
-                min="1"
-                max="5000"
-                value={maxComments}
-                onChange={(event) => setMaxComments(Number(event.target.value))}
-              />
+          <div className="start-form__settings">
+            <span className="start-form__settings-title">詳細設定</span>
+            <div className="start-form__number-fields">
+              <label>
+                最大コメント数
+                <input
+                  type="number"
+                  min="1"
+                  max="5000"
+                  value={maxComments}
+                  onChange={(event) => setMaxComments(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                クラスタ数
+                <input
+                  type="number"
+                  min="5"
+                  max="12"
+                  value={clusterCount}
+                  onChange={(event) => setClusterCount(Number(event.target.value))}
+                />
+                <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
+              </label>
+            </div>
+            <label className="start-form__wide-field">
+              返信コメント
+              <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
+                <option value="none">トップレベルのみ</option>
+                <option value="inline_subset">同梱返信だけ含める</option>
+                <option value="full">返信を追加取得して含める</option>
+              </select>
+              <small className="field-note">{replyFetchModeDescription(replyFetchMode)}</small>
             </label>
-            <label>
-              クラスタ数
-              <input
-                type="number"
-                min="5"
-                max="12"
-                value={clusterCount}
-                onChange={(event) => setClusterCount(Number(event.target.value))}
-              />
-              <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
+            <label className="checkbox-label">
+              <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
+              差分更新する
+              <small>同条件 cache があっても YouTube API を再取得し、重複を除いて cache を更新します。</small>
             </label>
           </div>
-          <label className="start-form__wide-field">
-            返信コメント
-            <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
-              <option value="none">トップレベルのみ</option>
-              <option value="inline_subset">同梱返信だけ含める</option>
-              <option value="full">返信を追加取得して含める</option>
-            </select>
-            <small className="field-note">{replyFetchModeDescription(replyFetchMode)}</small>
-          </label>
-          <label className="checkbox-label">
-            <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
-            差分更新する
-            <small>同条件 cache があっても YouTube API を再取得し、重複を除いて cache を更新します。</small>
-          </label>
           <button type="submit" disabled={busy}>
             {busy ? "処理中" : "分析を開始"}
           </button>
@@ -970,15 +976,16 @@ export default function App() {
         </section>
       ) : null}
 
-      <details className="panel history-panel">
-        <summary>
-          <div>
-            <h2>過去分析</h2>
-            <p>保存済み run を読み込みます。同じ取得条件のコメントは cache から再利用されます。</p>
-          </div>
-          <strong>{runHistory.length} 件</strong>
-        </summary>
-        <div className="history-panel__body">
+      <section className="utility-panels">
+        <details className="panel history-panel">
+          <summary>
+            <div>
+              <h2>過去分析</h2>
+              <p>保存済み run を読み込みます。同じ取得条件のコメントは cache から再利用されます。</p>
+            </div>
+            <strong>{runHistory.length} 件</strong>
+          </summary>
+          <div className="history-panel__body">
           <div className="section-heading">
             <div>
               <h3>保存済み run</h3>
@@ -1017,18 +1024,18 @@ export default function App() {
           ) : (
             <p className="list-note">保存済み run はまだありません。</p>
           )}
-        </div>
-      </details>
-
-      <details className="panel ops-panel">
-        <summary>
-          <div>
-            <h2>運用・設定・データ管理</h2>
-            <p>API key の読み込み状態、取得設定、保存データ容量、export 導線を確認します。</p>
           </div>
-          <strong>{dataSummary ? formatBytes(dataSummary.total_bytes) : "未取得"}</strong>
-        </summary>
-        <div className="history-panel__body">
+        </details>
+
+        <details className="panel ops-panel">
+          <summary>
+            <div>
+              <h2>運用・設定・データ管理</h2>
+              <p>API key の読み込み状態、取得設定、保存データ容量、export 導線を確認します。</p>
+            </div>
+            <strong>{dataSummary ? formatBytes(dataSummary.total_bytes) : "未取得"}</strong>
+          </summary>
+          <div className="history-panel__body">
           <div className="section-heading">
             <div>
               <h3>設定状態</h3>
@@ -1122,8 +1129,9 @@ export default function App() {
             </button>
             <small>export は明示操作だけで実行します。通常 test は fixture を使い、live API test とは分けて扱います。</small>
           </div>
-        </div>
-      </details>
+          </div>
+        </details>
+      </section>
 
       {run ? (
         <section className="panel status-panel status-panel--run">
