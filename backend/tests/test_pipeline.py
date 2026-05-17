@@ -91,6 +91,12 @@ class PipelineTest(unittest.TestCase):
         self.assertNotIn("さんとみりちゃむ", tokens)
         self.assertNotIn("大喜利クリニック", tokens)
 
+    def test_candidate_tokens_split_prefixed_hiragana_honorific_nickname(self):
+        tokens = extract_candidate_tokens("来てくれたねんねんちゃんがよかった")
+        self.assertIn("ねんねん", tokens)
+        self.assertNotIn("くれたねんねんちゃん", tokens)
+        self.assertNotIn("たねんねんちゃん", tokens)
+
     def test_description_guest_list_is_strong_person_context(self):
         description = """説明文です。
 

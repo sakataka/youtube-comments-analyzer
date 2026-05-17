@@ -97,6 +97,7 @@ _NORMALIZED_NOISE_KEYWORDS = {normalize_alias(word) for word in NOISE_KEYWORDS}
 _FUNCTION_POS = {"助詞", "助動詞", "補助記号", "記号", "空白"}
 _CONTENT_POS = {"名詞", "動詞", "形容詞", "形状詞"}
 _NON_INDEPENDENT_POS2 = {"非自立可能"}
+_HONORIFIC_SURFACES = {"さん", "ちゃん", "くん", "君", "氏", "様"}
 _TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶーA-Za-z]{2,24}")
 _HONORIFIC_TERM_RE = re.compile(
     r"([一-龥々]{2,6}|[一-龥々]{1,4}[ァ-ヶー]{2,8}|[ァ-ヶー]{2,16}|(?![ともがはをにでの])[ぁ-んー]{2,5})(さん|ちゃん|くん|君|氏|様)"
@@ -192,11 +193,15 @@ def is_person_alias_like(term: str) -> bool:
             return False
         if honorific_alias_is_morphological_person(alias, term):
             return True
-        return bool(_KATAKANA_NICKNAME_RE.fullmatch(alias) or _HIRAGANA_NICKNAME_RE.fullmatch(alias))
+        if _KATAKANA_NICKNAME_RE.fullmatch(alias) or _HIRAGANA_NICKNAME_RE.fullmatch(alias):
+            return True
+        return bool(_KATAKANA_NICKNAME_RE.fullmatch(term) or is_simple_hiragana_honorific_nickname(term))
     tokens = analyze_japanese(term)
     if tokens and all(is_person_name_token(token) for token in tokens):
         return True
     if _KATAKANA_NICKNAME_RE.fullmatch(term) or _HIRAGANA_NICKNAME_RE.fullmatch(term):
+        if contains_prefixed_hiragana_honorific_nickname(tokens):
+            return False
         return True
     if _KANJI_KATAKANA_NAME_RE.fullmatch(term):
         return not tokens
@@ -237,6 +242,7 @@ def person_alias_terms(text: str) -> list[str]:
 
 def honorific_person_alias_terms(text: str) -> list[str]:
     terms: list[str] = []
+    terms.extend(morphological_honorific_alias_terms(text))
     for match in _HONORIFIC_TERM_RE.finditer(text):
         full_term = f"{match.group(1)}{match.group(2)}"
         alias = match.group(1)
@@ -245,6 +251,41 @@ def honorific_person_alias_terms(text: str) -> list[str]:
         if is_person_alias_like(full_term):
             terms.append(alias)
     return unique_terms(terms)
+
+
+def morphological_honorific_alias_terms(text: str) -> list[str]:
+    tokens = analyze_japanese(text)
+    terms: list[str] = []
+    for index, token in enumerate(tokens):
+        if token.surface not in _HONORIFIC_SURFACES or index == 0:
+            continue
+        previous = tokens[index - 1]
+        if is_person_name_token(previous):
+            terms.append(previous.surface)
+            continue
+        if previous.pos and previous.pos[0] == "名詞" and re.fullmatch(r"(?![ともがはをにでの])[ぁ-んー]{2,8}", previous.surface):
+            terms.append(previous.surface)
+    return unique_terms(terms)
+
+
+def is_simple_hiragana_honorific_nickname(term: str) -> bool:
+    tokens = analyze_japanese(term)
+    return (
+        len(tokens) == 2
+        and tokens[1].surface in _HONORIFIC_SURFACES
+        and tokens[0].pos
+        and tokens[0].pos[0] == "名詞"
+        and re.fullmatch(r"(?![ともがはをにでの])[ぁ-んー]{2,8}", tokens[0].surface) is not None
+    )
+
+
+def contains_prefixed_hiragana_honorific_nickname(tokens: list[JapaneseToken]) -> bool:
+    if len(tokens) <= 2 or tokens[-1].surface not in _HONORIFIC_SURFACES:
+        return False
+    previous = tokens[-2]
+    if not previous.pos or previous.pos[0] != "名詞" or not re.fullmatch(r"[ぁ-んー]{2,8}", previous.surface):
+        return False
+    return any(token.pos and token.pos[0] in {"動詞", "助動詞", "助詞"} for token in tokens[:-2])
 
 
 def is_honorific_capture_noise(term: str) -> bool:
@@ -260,7 +301,7 @@ def honorific_alias_is_morphological_person(alias: str, full_term: str) -> bool:
     tokens = analyze_japanese(full_term)
     if not tokens:
         return False
-    name_tokens = [token for token in tokens if token.surface not in {"さん", "ちゃん", "くん", "君", "氏", "様"}]
+    name_tokens = [token for token in tokens if token.surface not in _HONORIFIC_SURFACES]
     if not name_tokens or "".join(token.surface for token in name_tokens) != alias:
         return False
     return all(is_person_name_token(token) for token in name_tokens)
