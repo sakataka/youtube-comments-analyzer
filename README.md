@@ -101,7 +101,7 @@ YOUTUBE_FIXTURE_FALLBACK=
 set -a
 source .env
 set +a
-.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 フロントエンド:

@@ -9,12 +9,14 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 from .pipeline import AnalysisStore
 from .youtube import FetchConfig, YouTubeCommentClient, parse_youtube_video_id
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR") or ROOT_DIR / "data")
 DB_PATH = Path(os.getenv("DATABASE_URL") or DATA_DIR / "app.sqlite3")
 FIXTURE_PATH = ROOT_DIR / "fixtures" / "sample_comments_drawme.jsonl"
