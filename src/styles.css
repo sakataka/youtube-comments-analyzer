@@ -30,10 +30,28 @@ body {
   overflow-x: hidden;
 }
 
+p,
+small,
+strong,
+span,
+button,
+input,
+select {
+  overflow-wrap: anywhere;
+}
+
 button,
 input,
 select {
   font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #7fb0ff;
+  outline-offset: 2px;
 }
 
 button {
@@ -170,11 +188,91 @@ select {
   width: 100%;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #175ddc;
+}
+
+input:user-invalid,
+select:user-invalid {
+  background: #fff6f6;
+  border-color: #c93333;
+  box-shadow: inset 3px 0 0 #c93333;
+}
+
 .field-note {
   color: var(--text-subtle);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.45;
+}
+
+.field-error {
+  color: #a01818;
+  display: none;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+input:user-invalid + .field-error,
+select:user-invalid + .field-error {
+  display: block;
+}
+
+fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+legend {
+  color: #384655;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: var(--space-1);
+  padding: 0;
+}
+
+.radio-options {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.radio-options label {
+  align-items: start;
+  background: #fff;
+  border: 1px solid #d6dfeb;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 52px;
+  padding: 10px;
+}
+
+.radio-options input {
+  margin: 2px 0 0;
+  min-height: 0;
+  width: auto;
+}
+
+.radio-options span {
+  color: #27313d;
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 3px;
+  line-height: 1.3;
+}
+
+.radio-options small {
+  color: #8a5b00;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .checkbox-label {
@@ -199,6 +297,18 @@ select {
 .panel {
   margin-top: 18px;
   padding: 20px;
+}
+
+@supports (content-visibility: auto) {
+  .panel {
+    contain-intrinsic-size: auto 520px;
+    content-visibility: auto;
+  }
+
+  .result-tabs,
+  .status-panel {
+    content-visibility: visible;
+  }
 }
 
 .utility-panels {
@@ -2134,15 +2244,16 @@ blockquote {
 
 @media (max-width: 760px) {
   .app-shell {
-    overflow: hidden;
-    padding-left: 16px;
-    padding-right: 16px;
-    width: 100%;
+    overflow: visible;
+    padding-left: 0;
+    padding-right: 0;
+    width: min(var(--page-max-width), calc(100% - 32px));
   }
 
   .hero,
   .start-form,
   .start-form__number-fields,
+  .radio-options,
   .utility-panels,
   .status-panel,
   .run-overview,
@@ -2173,6 +2284,14 @@ blockquote {
     max-width: 100%;
     min-width: 0;
     width: 100%;
+  }
+
+  .hero {
+    width: 100%;
+  }
+
+  .start-form {
+    padding: var(--space-4);
   }
 
   .hero p,

@@ -428,6 +428,7 @@ export default function App() {
   const [clusterCount, setClusterCount] = useState(8);
   const [replyFetchMode, setReplyFetchMode] = useState<"none" | "inline_subset" | "full">("none");
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [startFormAttempted, setStartFormAttempted] = useState(false);
   const [activeTab, setActiveTab] = useState<ResultTab>("candidates");
   const [run, setRun] = useState<RunState | null>(null);
   const [runJob, setRunJob] = useState<RunJob | null>(null);
@@ -464,6 +465,9 @@ export default function App() {
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
   const [humanReviewConfirmedByRun, setHumanReviewConfirmedByRun] = useState<Record<string, boolean>>({});
   const [analysisFinalByRun, setAnalysisFinalByRun] = useState<Record<string, boolean>>({});
+  const debouncedCommentSearch = useDebouncedValue(commentSearch, 250);
+  const maxCommentBounds = settingsInfo?.max_comments ?? { min: 1, max: 5000 };
+  const clusterCountBounds = settingsInfo?.cluster_count ?? { min: 5, max: 12 };
 
   const candidateSummary = useMemo(() => {
     const persons = candidates?.persons ?? [];
@@ -541,7 +545,7 @@ export default function App() {
   }, [report, selectedDetailPersonId]);
 
   const selectedPersonDetails = useMemo(() => {
-    if (!report || !selectedDetailPerson) return null;
+    if (!report || !selectedDetailPerson || activeTab !== "details") return null;
     const person = report.persons.find((item) => item.person_id === selectedDetailPerson.person_id);
     const appeal = report.appeal_summary.people.find((item) => item.person_id === selectedDetailPerson.person_id);
     const comments = report.comments
@@ -555,7 +559,7 @@ export default function App() {
       aliases,
       featureWords: appeal?.feature_words ?? []
     };
-  }, [report, selectedDetailPerson]);
+  }, [activeTab, report, selectedDetailPerson]);
 
   const dashboardStats = useMemo(() => {
     if (!report) return null;
@@ -624,7 +628,7 @@ export default function App() {
       limit: String(commentPageSize),
       offset: String(commentPage * commentPageSize)
     });
-    if (commentSearch.trim()) params.set("search", commentSearch.trim());
+    if (debouncedCommentSearch.trim()) params.set("search", debouncedCommentSearch.trim());
     if (commentPersonFilter !== "all") params.set("person_id", commentPersonFilter);
     api<CommentsPage>(`/api/runs/${run.run_id}/comments?${params.toString()}`)
       .then((page) => {
@@ -639,7 +643,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [activeTab, commentPage, commentPageSize, commentPersonFilter, commentSearch, commentsRefreshKey, report, run]);
+  }, [activeTab, commentPage, commentPageSize, commentPersonFilter, commentsRefreshKey, debouncedCommentSearch, report, run]);
 
   useEffect(() => {
     if (!run || !report || activeTab !== "personComments" || !selectedDetailPersonId) return;
@@ -760,6 +764,7 @@ export default function App() {
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
+    setStartFormAttempted(true);
     setBusy(true);
     setLastAction(null);
     setError(null);
@@ -1142,47 +1147,85 @@ export default function App() {
             API キーなしでも fixture で検証できます。
           </p>
         </div>
-        <form className="start-form" onSubmit={startRun}>
-          <label className="start-form__url-field">
+        <form className="start-form" onSubmit={startRun} onInvalid={() => setStartFormAttempted(true)}>
+          <label className="start-form__url-field" htmlFor="youtube-url">
             YouTube URL
-            <input value={url} onChange={(event) => setUrl(event.target.value)} />
+            <input
+              id="youtube-url"
+              name="youtube-url"
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              enterKeyHint="go"
+              required
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={url}
+              aria-invalid={startFormAttempted && !url.trim() ? true : undefined}
+              aria-errormessage="youtube-url-error"
+              onChange={(event) => setUrl(event.target.value)}
+            />
+            <small className="field-error" id="youtube-url-error">
+              YouTube の動画 URL を入力してください。
+            </small>
           </label>
           <div className="start-form__settings">
             <span className="start-form__settings-title">詳細設定</span>
             <div className="start-form__number-fields">
-              <label>
+              <label htmlFor="max-comments">
                 最大コメント数
                 <input
+                  id="max-comments"
+                  name="max-comments"
                   type="number"
-                  min="1"
-                  max="5000"
+                  min={maxCommentBounds.min}
+                  max={maxCommentBounds.max}
+                  required
+                  inputMode="numeric"
                   value={maxComments}
                   onChange={(event) => setMaxComments(Number(event.target.value))}
                 />
               </label>
-              <label>
+              <label htmlFor="cluster-count">
                 クラスタ数
                 <input
+                  id="cluster-count"
+                  name="cluster-count"
                   type="number"
-                  min="5"
-                  max="12"
+                  min={clusterCountBounds.min}
+                  max={clusterCountBounds.max}
+                  required
+                  inputMode="numeric"
                   value={clusterCount}
                   onChange={(event) => setClusterCount(Number(event.target.value))}
                 />
-                <small className="field-note">コメントクラスタリングの目安です。5 から 12 の範囲で指定します。</small>
+                <small className="field-note">
+                  コメントクラスタリングの目安です。{clusterCountBounds.min} から {clusterCountBounds.max} の範囲で指定します。
+                </small>
               </label>
             </div>
-            <label className="start-form__wide-field">
-              返信コメント
-              <select value={replyFetchMode} onChange={(event) => setReplyFetchMode(event.target.value as "none" | "inline_subset" | "full")}>
-                <option value="none">トップレベルのみ</option>
-                <option value="inline_subset">同梱返信だけ含める</option>
-                <option value="full">返信を追加取得して含める</option>
-              </select>
+            <fieldset className="start-form__wide-field">
+              <legend>返信コメント</legend>
+              <div className="radio-options">
+                {replyFetchModes(settingsInfo).map((mode) => (
+                  <label key={mode.value}>
+                    <input
+                      type="radio"
+                      name="reply-fetch-mode"
+                      value={mode.value}
+                      checked={replyFetchMode === mode.value}
+                      onChange={() => setReplyFetchMode(mode.value)}
+                    />
+                    <span>
+                      {mode.label}
+                      {mode.uses_extra_quota ? <small>追加 quota</small> : null}
+                    </span>
+                  </label>
+                ))}
+              </div>
               <small className="field-note">{replyFetchModeDescription(replyFetchMode)}</small>
-            </label>
-            <label className="checkbox-label">
-              <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
+            </fieldset>
+            <label className="checkbox-label" htmlFor="force-refresh">
+              <input id="force-refresh" name="force-refresh" type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
               差分更新する
               <small>同条件 cache があっても YouTube API を再取得し、重複を除いて cache を更新します。</small>
             </label>
@@ -2651,7 +2694,12 @@ export default function App() {
             <label>
               検索
               <input
+                id="comment-search"
+                name="comment-search"
                 placeholder="コメント本文で検索"
+                type="search"
+                autoComplete="off"
+                enterKeyHint="search"
                 value={commentSearch}
                 onChange={(event) => setCommentSearch(event.target.value)}
               />
@@ -2962,6 +3010,33 @@ function LikeCount({ count, strong = false }: { count: number; strong?: boolean 
     </>
   );
   return strong ? <strong className="like-count">{content}</strong> : <small className="like-count">{content}</small>;
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
+function replyFetchModes(settingsInfo: SettingsInfo | null): Array<{ value: "none" | "inline_subset" | "full"; label: string; uses_extra_quota: boolean }> {
+  const modes = settingsInfo?.reply_fetch_modes.filter(isReplyFetchModeOption) ?? [];
+  if (modes.length) return modes;
+  return [
+    { value: "none", label: "トップレベルのみ", uses_extra_quota: false },
+    { value: "inline_subset", label: "同梱返信だけ含める", uses_extra_quota: false },
+    { value: "full", label: "返信を追加取得して含める", uses_extra_quota: true }
+  ];
+}
+
+function isReplyFetchModeOption(
+  mode: SettingsInfo["reply_fetch_modes"][number]
+): mode is { value: "none" | "inline_subset" | "full"; label: string; uses_extra_quota: boolean } {
+  return mode.value === "none" || mode.value === "inline_subset" || mode.value === "full";
 }
 
 function statusLabel(status: string): string {
