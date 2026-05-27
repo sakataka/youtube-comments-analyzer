@@ -103,7 +103,7 @@ def data_summary() -> dict[str, Any]:
         "llm_cache": directory_summary(llm_cache),
         "archive": directory_summary(DATA_DIR / "archive"),
         "total_bytes": directory_size(DATA_DIR),
-        "run_count": len(store.list_runs()),
+        "run_count": store.count_runs(),
     }
 
 

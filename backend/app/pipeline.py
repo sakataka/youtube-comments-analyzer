@@ -944,17 +944,32 @@ class AnalysisStore:
         comments = self.comments_for_snapshot(run["comment_snapshot_id"])
         comments_by_id = {comment["id"]: comment for comment in comments}
         persons = self.conn.execute("select * from persons where analysis_run_id = ? order by confidence desc", (run_id,)).fetchall()
+        aliases = self.conn.execute(
+            "select * from aliases where analysis_run_id = ? order by person_id asc, hit_count desc",
+            (run_id,),
+        ).fetchall()
+        aliases_by_person: dict[str, list[sqlite3.Row]] = {}
+        for alias in aliases:
+            aliases_by_person.setdefault(alias["person_id"], []).append(alias)
+
+        accepted_person_ids = {person["id"] for person in persons if person["status"] == "accepted"}
+        alias_mention_counts = {alias["id"]: 0 for alias in aliases}
+        accepted_mention_counts = {person["id"]: 0 for person in persons}
+        for comment in comments:
+            mentioned_accepted_persons: set[str] = set()
+            for alias in aliases:
+                if alias_matches(comment["text_normalized"], alias["normalized_alias"]):
+                    alias_mention_counts[alias["id"]] += 1
+                    if alias["status"] == "accepted" and alias["person_id"] in accepted_person_ids:
+                        mentioned_accepted_persons.add(alias["person_id"])
+            for person_id in mentioned_accepted_persons:
+                accepted_mention_counts[person_id] += 1
+
         output = []
         for person in persons:
-            aliases = self.conn.execute("select * from aliases where person_id = ? order by hit_count desc", (person["id"],)).fetchall()
-            accepted_alias_hit_total = sum(int(alias["hit_count"]) for alias in aliases if alias["status"] == "accepted")
-            all_alias_hit_total = sum(int(alias["hit_count"]) for alias in aliases)
-            accepted_aliases = [alias for alias in aliases if alias["status"] == "accepted" and person["status"] == "accepted"]
-            accepted_mention_comment_count = sum(
-                1
-                for comment in comments
-                if any(alias_matches(comment["text_normalized"], alias["normalized_alias"]) for alias in accepted_aliases)
-            )
+            person_aliases = aliases_by_person.get(person["id"], [])
+            accepted_alias_hit_total = sum(int(alias["hit_count"]) for alias in person_aliases if alias["status"] == "accepted")
+            all_alias_hit_total = sum(int(alias["hit_count"]) for alias in person_aliases)
             output.append({
                 "person_id": person["id"],
                 "display_name": person["display_name"],
@@ -964,18 +979,14 @@ class AnalysisStore:
                 "reason": person["reason"],
                 "accepted_alias_hit_total": accepted_alias_hit_total,
                 "all_alias_hit_total": all_alias_hit_total,
-                "accepted_mention_comment_count": accepted_mention_comment_count,
+                "accepted_mention_comment_count": accepted_mention_counts[person["id"]],
                 "aliases": [
                     {
                         "alias_id": alias["id"],
                         "alias_text": alias["alias_text"],
                         "normalized_alias": alias["normalized_alias"],
                         "hit_count": alias["hit_count"],
-                        "mention_comment_count": sum(
-                            1
-                            for comment in comments
-                            if alias_matches(comment["text_normalized"], alias["normalized_alias"])
-                        ),
+                        "mention_comment_count": alias_mention_counts[alias["id"]],
                         "confidence": alias["confidence"],
                         "source": alias["source"],
                         "status": alias["status"],
@@ -991,7 +1002,7 @@ class AnalysisStore:
                             if comment_id in comments_by_id
                         ],
                     }
-                    for alias in aliases
+                    for alias in person_aliases
                 ],
             })
         return {"run_id": run_id, "persons": output}
@@ -1178,8 +1189,76 @@ class AnalysisStore:
         }
 
     def list_runs(self) -> list[dict[str, Any]]:
-        rows = self.conn.execute("select * from analysis_runs where status != 'archived' order by created_at desc limit 50").fetchall()
-        return [self.get_run(row["id"]) for row in rows]
+        rows = self.conn.execute(
+            """
+            select
+              r.id as run_id,
+              r.status,
+              r.stage,
+              r.progress,
+              r.error_message,
+              r.created_at,
+              v.youtube_video_id,
+              v.url,
+              v.title,
+              v.channel_title,
+              v.youtube_comment_count,
+              v.comment_count_available,
+              v.youtube_view_count,
+              v.youtube_like_count,
+              s.source,
+              s.max_comments_requested,
+              s.max_comments_fetched,
+              s.fetched_top_level_count,
+              s.fetched_reply_count,
+              s.fetch_order,
+              s.reply_fetch_mode,
+              s.fetched_at
+            from analysis_runs r
+            join videos v on v.id = r.video_id
+            join comment_snapshots s on s.id = r.comment_snapshot_id
+            where r.status != 'archived'
+            order by r.created_at desc
+            limit 50
+            """
+        ).fetchall()
+        return [
+            {
+                "run_id": row["run_id"],
+                "status": row["status"],
+                "stage": row["stage"],
+                "progress": row["progress"],
+                "error_message": row["error_message"],
+                "created_at": row["created_at"],
+                "video": {
+                    "youtube_video_id": row["youtube_video_id"],
+                    "url": row["url"],
+                    "title": row["title"],
+                    "channel_title": row["channel_title"],
+                    "youtube_comment_count": row["youtube_comment_count"],
+                    "comment_count_available": bool(row["comment_count_available"]),
+                    "youtube_view_count": row["youtube_view_count"],
+                    "youtube_like_count": row["youtube_like_count"],
+                },
+                "fetch_summary": {
+                    "source": row["source"],
+                    "max_comments_requested": row["max_comments_requested"],
+                    "max_comments_fetched": row["max_comments_fetched"],
+                    "fetched_top_level_count": row["fetched_top_level_count"],
+                    "fetched_reply_count": row["fetched_reply_count"],
+                    "fetch_order": row["fetch_order"],
+                    "reply_fetch_mode": row["reply_fetch_mode"],
+                    "fetched_at": row["fetched_at"],
+                    "coverage": fetch_coverage_summary(row, row),
+                },
+            }
+            for row in rows
+        ]
+
+    def count_runs(self) -> int:
+        return self.conn.execute(
+            "select count(*) from analysis_runs where status != 'archived'",
+        ).fetchone()[0]
 
     def archive_run(self, run_id: str) -> dict[str, Any]:
         self.get_run_row(run_id)
