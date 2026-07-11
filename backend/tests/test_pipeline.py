@@ -353,6 +353,14 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(first_page["limit"], 5)
             self.assertEqual(len(first_page["comments"]), 5)
             self.assertEqual(first_page["total"], report["evidence"]["comment_count"])
+            self.assertTrue(all(comment["sentiment_label"] in {"positive", "neutral", "negative", "mixed", "unclear"} for comment in first_page["comments"]))
+            target_sentiment = target_comment["sentiment_label"]
+            sentiment_page = store.get_comments_page(run_id, limit=20, offset=0, sentiment=target_sentiment)
+            self.assertGreater(sentiment_page["total"], 0)
+            self.assertTrue(all(comment["sentiment_label"] == target_sentiment for comment in sentiment_page["comments"]))
+            likes_page = store.get_comments_page(run_id, limit=20, offset=0, sort="likes")
+            like_keys = [(comment["like_count"], comment["comment_id"]) for comment in likes_page["comments"]]
+            self.assertEqual([value[0] for value in like_keys], sorted((value[0] for value in like_keys), reverse=True))
             person_page = store.get_comments_page(run_id, limit=20, offset=0, person_id=target_person["person_id"])
             self.assertGreater(person_page["total"], 0)
             self.assertTrue(
@@ -361,6 +369,14 @@ class PipelineTest(unittest.TestCase):
                     for comment in person_page["comments"]
                 )
             )
+            combined_page = store.get_comments_page(
+                run_id,
+                limit=20,
+                offset=0,
+                person_id=target_person["person_id"],
+                sentiment=target_sentiment,
+            )
+            self.assertTrue(all(comment["sentiment_label"] == target_sentiment for comment in combined_page["comments"]))
             search_page = store.get_comments_page(run_id, limit=10, offset=0, search=target_comment["text_original"][:4])
             self.assertGreater(search_page["total"], 0)
             updated_report = store.apply_comment_actions(
@@ -821,10 +837,11 @@ class PipelineTest(unittest.TestCase):
 
             self.assertEqual(fake.calls, 1)
             self.assertEqual(cached["source"], "cache")
-            self.assertEqual(result["schema_version"], "ai_insight.v1")
+            self.assertEqual(result["schema_version"], "ai_insight.v2")
             self.assertEqual(latest["headline"], "コメント欄は主要人物への好意的反応が中心")
             self.assertTrue((data_dir / "runs" / run_id / "ai_insight.json").exists())
             self.assertIn("mention_ranking", fake.last_prompt)
+            self.assertIn("representative_comments", fake.last_prompt)
             self.assertNotIn("author_display_name", fake.last_prompt)
 
     def test_ai_insight_json_parser_accepts_fenced_json(self):
@@ -833,7 +850,15 @@ class PipelineTest(unittest.TestCase):
 {"headline":"h","summary":"s","insights":[],"watch_points":["w"],"suggested_next_questions":[]}
 ```"""
         )
-        self.assertEqual(parsed["schema_version"], "ai_insight.v1")
+        self.assertEqual(parsed["schema_version"], "ai_insight.v2")
+
+    def test_ai_insight_json_parser_normalizes_v1_fields(self):
+        parsed = parse_ai_insight_json(
+            '{"headline":"h","summary":"s","insights":[{"title":"t","detail":"d","evidence":["12件"]}],"watch_points":[]}'
+        )
+        self.assertEqual(parsed["insights"][0]["conclusion"], "t")
+        self.assertEqual(parsed["insights"][0]["interpretation"], "d")
+        self.assertEqual(parsed["insights"][0]["metrics"], ["12件"])
 
     def test_llm_assist_failure_is_saved_as_degraded_report_section(self):
         class FailingLlmClient:

@@ -25,7 +25,21 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
 
   await expect(page.getByText("暫定レポート", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "この動画はどう受け取られた？" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "この動画はどう受け取られた？" }).getByRole("img", { name: /ポジティブ/ })).toBeVisible();
+  const reception = page.getByRole("region", { name: "この動画はどう受け取られた？" });
+  await expect(reception.getByRole("group", { name: /ポジティブ/ })).toBeVisible();
+  await reception.getByRole("button", { name: "ポジティブのコメントを表示" }).first().click();
+  await expect(page.getByRole("tab", { name: "コメント", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("感情")).toHaveText(/ポジティブ/);
+  await expect(page.locator(".comment-row").first().getByText("ポジティブ", { exact: true })).toBeVisible();
+
+  await page.getByLabel("並び順").click();
+  await page.getByRole("option", { name: "高評価順" }).click();
+  await expect.poll(async () => {
+    const likeCounts = await page.locator(".comment-like").evaluateAll((items) => items.map((item) => Number(item.textContent?.replace(/\D/g, "") || 0)));
+    return likeCounts.every((value, index) => index === 0 || likeCounts[index - 1] >= value);
+  }).toBe(true);
+
+  await page.getByRole("tab", { name: "概要", exact: true }).click();
 
   const overviewTab = page.getByRole("tab", { name: "概要", exact: true });
   await overviewTab.focus();
@@ -35,6 +49,8 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
 
   await page.getByRole("tab", { name: "コメント", exact: true }).click();
   await expect(page.getByRole("heading", { name: "根拠コメント" })).toBeVisible();
+  await page.getByLabel("感情").click();
+  await page.getByRole("option", { name: "すべて" }).click();
   await page.getByRole("searchbox", { name: "検索" }).fill("みりちゃむ");
   await expect(page.getByRole("article").filter({ hasText: "みりちゃむ" }).first()).toBeVisible();
 

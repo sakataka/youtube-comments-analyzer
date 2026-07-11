@@ -57,7 +57,7 @@ def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
 
 def build_failed_ai_insight(input_hash: str, exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": "ai_insight.v1",
+        "schema_version": "ai_insight.v2",
         "prompt_version": INSIGHT_PROMPT_VERSION,
         "provider": "codex_app_server",
         "source": "codex_app_server",
@@ -1451,6 +1451,8 @@ class AnalysisStore:
         offset: int = 0,
         person_id: str | None = None,
         search: str | None = None,
+        sentiment: str | None = None,
+        sort: str = "source",
     ) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         where = ["c.comment_snapshot_id = ?"]
@@ -1479,20 +1481,33 @@ class AnalysisStore:
                 """
             )
             params.extend([run_id, person_id])
+        if sentiment:
+            where.append(
+                """
+                exists (
+                  select 1 from sentiment_labels s
+                  where s.analysis_run_id = ? and s.comment_id = c.id
+                    and s.target_type = 'video' and s.target_id is null and s.label = ?
+                )
+                """
+            )
+            params.extend([run_id, sentiment])
         where_sql = " and ".join(where)
+        order_sql = "c.like_count desc, c.source_order asc" if sort == "likes" else "c.source_order asc"
         total = self.conn.execute(f"select count(*) as count from comments c where {where_sql}", params).fetchone()["count"]
         rows = self.conn.execute(
             f"""
             select c.*
             from comments c
             where {where_sql}
-            order by c.source_order asc
+            order by {order_sql}
             limit ? offset ?
             """,
             [*params, limit, offset],
         ).fetchall()
         comment_ids = [row["id"] for row in rows]
         mentions_by_comment: dict[str, list[dict[str, Any]]] = {comment_id: [] for comment_id in comment_ids}
+        sentiments_by_comment: dict[str, str] = {}
         if comment_ids:
             placeholders = ",".join("?" for _ in comment_ids)
             mention_rows = self.conn.execute(
@@ -1512,6 +1527,16 @@ class AnalysisStore:
                     "confidence": mention["confidence"],
                     "match_method": mention["match_method"],
                 })
+            sentiment_rows = self.conn.execute(
+                f"""
+                select comment_id, label
+                from sentiment_labels
+                where analysis_run_id = ? and target_type = 'video' and target_id is null
+                  and comment_id in ({placeholders})
+                """,
+                [run_id, *comment_ids],
+            ).fetchall()
+            sentiments_by_comment = {row["comment_id"]: row["label"] for row in sentiment_rows}
         return {
             "run_id": run_id,
             "total": total,
@@ -1524,6 +1549,7 @@ class AnalysisStore:
                     "like_count": comment["like_count"],
                     "is_reply": bool(comment["is_reply"]),
                     "parent_comment_id": comment["parent_comment_id"],
+                    "sentiment_label": sentiments_by_comment.get(comment["id"], "unclear"),
                     "mentioned_persons": mentions_by_comment.get(comment["id"], []),
                 }
                 for comment in rows

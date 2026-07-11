@@ -295,9 +295,19 @@ def get_comments(
     offset: int = Query(default=0, ge=0),
     person_id: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    sentiment: Literal["positive", "neutral", "negative", "mixed", "unclear"] | None = Query(default=None),
+    sort: Literal["source", "likes"] = Query(default="source"),
 ) -> dict[str, Any]:
     try:
-        return store.get_comments_page(run_id, limit=limit, offset=offset, person_id=person_id, search=search)
+        return store.get_comments_page(
+            run_id,
+            limit=limit,
+            offset=offset,
+            person_id=person_id,
+            search=search,
+            sentiment=sentiment,
+            sort=sort,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -206,11 +206,12 @@ export type Report = {
   evidence: { comments_endpoint: string; comment_count: number };
 };
 
-type ReportComment = {
+export type ReportComment = {
   comment_id: string;
   text_original: string;
   like_count: number;
   is_reply: boolean;
+  sentiment_label: SentimentLabel;
   mentioned_persons: Array<{ person_id: string; display_name: string; confidence: number; match_method: string }>;
 };
 
@@ -223,10 +224,19 @@ export type CommentsPage = {
 };
 
 export type AiInsight = {
+  schema_version?: "ai_insight.v1" | "ai_insight.v2";
   status?: string;
   headline: string;
   summary: string;
-  insights: Array<{ title: string; detail: string; evidence: string[] }>;
+  insights: Array<{
+    conclusion?: string;
+    interpretation?: string;
+    metrics?: string[];
+    evidence_comments?: string[];
+    title?: string;
+    detail?: string;
+    evidence?: string[];
+  }>;
   watch_points: string[];
 };
 

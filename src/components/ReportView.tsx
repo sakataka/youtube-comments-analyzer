@@ -31,9 +31,13 @@ type Props = {
   commentsLoading: boolean;
   commentSearch: string;
   commentPersonFilter: string;
+  commentSentimentFilter: string;
+  commentSort: string;
   commentPage: number;
   setCommentSearch: (value: string) => void;
   setCommentPersonFilter: (value: string) => void;
+  setCommentSentimentFilter: (value: string) => void;
+  setCommentSort: (value: string) => void;
   setCommentPage: (value: number) => void;
   onNewAnalysis: () => void;
   onOpenSettings: () => void;
@@ -89,9 +93,13 @@ export function ReportView(props: Props) {
             loading={props.commentsLoading}
             search={props.commentSearch}
             personFilter={props.commentPersonFilter}
+            sentimentFilter={props.commentSentimentFilter}
+            sort={props.commentSort}
             page={props.commentPage}
             onSearchChange={props.setCommentSearch}
             onPersonFilterChange={props.setCommentPersonFilter}
+            onSentimentFilterChange={props.setCommentSentimentFilter}
+            onSortChange={props.setCommentSort}
             onPageChange={props.setCommentPage}
           />
         </TabsContent>
@@ -104,12 +112,17 @@ function Overview(props: Props) {
   const { report } = props;
   const ranking = report.rankings.mention_ranking.slice(0, 5);
   const topics = report.topics.items.slice(0, 4);
+  const openSentimentComments = (label: SentimentLabel) => {
+    props.setCommentSentimentFilter(label);
+    props.setCommentPage(0);
+    props.setView("comments");
+  };
   return (
     <div className="report-grid">
       <div className="report-main">
         <section className="report-section sentiment-overview" aria-labelledby="reception-title">
           <SectionHeading id="reception-title" title="この動画はどう受け取られた？" description="明示的な評価語はルールで、文脈が曖昧なコメントはAIで補助判定します。" aside={<span>{formatNumber(report.sentiment.overall.total)}件を分析</span>} />
-          <SentimentBar distribution={report.sentiment.overall} large />
+          <SentimentBar distribution={report.sentiment.overall} large onSelect={openSentimentComments} />
         </section>
 
         <section className="report-section" aria-labelledby="people-title">
@@ -131,6 +144,8 @@ function Overview(props: Props) {
             ))}
           </div>
         </section>
+
+        <InsightSection insight={props.aiInsight} busy={props.aiBusy} onRun={props.onRunAi} />
       </div>
 
       <aside className="insight-rail" aria-label="分析の補足">
@@ -150,17 +165,10 @@ function Overview(props: Props) {
           <Button className="inline-link" variant="link" type="button" data-dialog-trigger="review" onClick={props.onOpenReview}>レビューを開く</Button>
         </section>
         <section>
-          <h2>AIサマリー</h2>
-          {props.aiInsight?.summary ? (
-            <>
-              <strong>{props.aiInsight.headline}</strong>
-              <p>{props.aiInsight.summary}</p>
-            </>
-          ) : (
-            <p>集計結果から、注目点と注意点を短く整理します。</p>
-          )}
+          <h2>AIインサイト</h2>
+          <p>{props.aiInsight?.summary ? "生成済みです。本文の分析セクションで根拠とともに確認できます。" : "集計と代表コメントから、動画が受けた理由を掘り下げます。"}</p>
           <Button className="inline-link" variant="link" type="button" disabled={props.aiBusy} onClick={props.onRunAi}>
-            {props.aiBusy ? "抽出しています" : props.aiInsight ? "サマリーを更新" : "AIサマリーを抽出"}
+            {props.aiBusy ? "分析しています" : props.aiInsight ? "インサイトを更新" : "インサイトを生成"}
           </Button>
         </section>
       </aside>
@@ -254,22 +262,49 @@ function PersonTable({ rows, onSelect, selectedId }: { rows: RankingRow[]; onSel
   );
 }
 
-function SentimentBar({ distribution, large = false, compact = false }: { distribution: SentimentDistribution; large?: boolean; compact?: boolean }) {
+function SentimentBar({ distribution, large = false, compact = false, onSelect }: { distribution: SentimentDistribution; large?: boolean; compact?: boolean; onSelect?: (label: SentimentLabel) => void }) {
+  const labels: SentimentLabel[] = ["positive", "neutral", "negative", "mixed", "unclear"];
   return (
     <div className={large ? "sentiment sentiment--large" : compact ? "sentiment sentiment--compact" : "sentiment"}>
-      <div className="sentiment-bar" role="img" aria-label={sentimentAriaLabel(distribution)}>
-        {(["positive", "neutral", "negative", "mixed", "unclear"] as SentimentLabel[]).map((label) => (
-          <span className={`sentiment-bar__${label}`} style={{ width: `${distribution.rates[label] * 100}%` }} key={label} />
+      <div className="sentiment-bar" role={onSelect ? "group" : "img"} aria-label={sentimentAriaLabel(distribution)}>
+        {labels.map((label) => (
+          onSelect ? <button type="button" className={`sentiment-bar__${label}`} style={{ width: `${distribution.rates[label] * 100}%` }} aria-label={`${sentimentLabel(label)}のコメントを表示`} title={`${sentimentLabel(label)} ${formatPercent(distribution.rates[label], 0)}`} onClick={() => onSelect(label)} key={label} />
+            : <span className={`sentiment-bar__${label}`} style={{ width: `${distribution.rates[label] * 100}%` }} key={label} />
         ))}
       </div>
       {compact ? null : (
         <div className="sentiment-legend">
-          {(["positive", "neutral", "negative", "mixed", "unclear"] as SentimentLabel[]).map((label) => (
-            <span key={label}><i className={`legend-dot legend-dot--${label}`} />{sentimentLabel(label)} {formatPercent(distribution.rates[label], 0)}</span>
+          {labels.map((label) => (
+            onSelect ? <button type="button" onClick={() => onSelect(label)} key={label}><i className={`legend-dot legend-dot--${label}`} />{sentimentLabel(label)} {formatPercent(distribution.rates[label], 0)}</button>
+              : <span key={label}><i className={`legend-dot legend-dot--${label}`} />{sentimentLabel(label)} {formatPercent(distribution.rates[label], 0)}</span>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function InsightSection({ insight, busy, onRun }: { insight: AiInsight | null; busy: boolean; onRun: () => void }) {
+  return (
+    <section className="report-section insight-section" aria-labelledby="insight-title">
+      <SectionHeading id="insight-title" title="コメントから見える動画の勝ち筋" description="集計値と実際の反応を結びつけ、受けた理由と再現できそうな要素を読み解きます。" aside={<Button className="inline-link" variant="link" type="button" disabled={busy} onClick={onRun}>{busy ? "分析しています" : insight ? "更新" : "AIで分析"}</Button>} />
+      {insight?.summary ? (
+        <div className="insight-content">
+          <div className="insight-lead"><h3>{insight.headline}</h3><p>{insight.summary}</p></div>
+          <div className="insight-list">
+            {insight.insights.map((item, index) => {
+              const conclusion = item.conclusion || item.title || `注目点 ${index + 1}`;
+              const interpretation = item.interpretation || item.detail || "";
+              const metrics = item.metrics || item.evidence || [];
+              return <article key={`${conclusion}-${index}`}><h4>{conclusion}</h4><p>{interpretation}</p>{metrics.length ? <ul className="insight-metrics">{metrics.map((value) => <li key={value}>{value}</li>)}</ul> : null}{item.evidence_comments?.length ? <div className="insight-evidence">{item.evidence_comments.map((comment) => <blockquote key={comment}>{comment}</blockquote>)}</div> : null}</article>;
+            })}
+          </div>
+          {insight.watch_points.length ? <div className="insight-watch"><h4>読み取り上の注意</h4><ul>{insight.watch_points.map((point) => <li key={point}>{point}</li>)}</ul></div> : null}
+        </div>
+      ) : (
+        <div className="insight-empty"><p>{busy ? "人物・話題・高評価コメントを横断して分析しています。" : "人物の言及量だけでなく、高評価コメントや話題ごとの代表反応まで使って、動画が支持された理由を整理します。"}</p>{busy ? <progress aria-label="AIインサイトを生成中" /> : null}</div>
+      )}
+    </section>
   );
 }
 

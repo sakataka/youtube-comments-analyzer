@@ -40,6 +40,8 @@ export default function App() {
   const [commentsPage, setCommentsPage] = useState<CommentsPage | null>(null);
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
+  const [commentSentimentFilter, setCommentSentimentFilter] = useState("all");
+  const [commentSort, setCommentSort] = useState("source");
   const [commentPage, setCommentPage] = useState(0);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,10 +70,10 @@ export default function App() {
   useEffect(() => {
     if (!run || view !== "comments") return;
     const timer = window.setTimeout(() => {
-      void loadComments(run.run_id, commentPage, commentSearch, commentPersonFilter);
+      void loadComments(run.run_id, commentPage, commentSearch, commentPersonFilter, commentSentimentFilter, commentSort);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [commentPage, commentPersonFilter, commentSearch, run, view]);
+  }, [commentPage, commentPersonFilter, commentSearch, commentSentimentFilter, commentSort, run, view]);
 
   async function loadInitialData() {
     const [nextSettings, nextData, runList] = await Promise.all([
@@ -140,6 +142,11 @@ export default function App() {
       setReport(nextReport);
       setAiInsight(nextInsight);
       setSelectedPersonId(nextReport.rankings.mention_ranking[0]?.person_id ?? null);
+      setCommentSearch("");
+      setCommentPersonFilter("all");
+      setCommentSentimentFilter("all");
+      setCommentSort("source");
+      setCommentPage(0);
       setView("overview");
       setJob(null);
       setReviewOpen(false);
@@ -239,12 +246,14 @@ export default function App() {
     }
   }
 
-  async function loadComments(runId: string, page: number, search: string, personFilter: string) {
+  async function loadComments(runId: string, page: number, search: string, personFilter: string, sentimentFilter: string, sort: string) {
     setCommentsLoading(true);
     try {
       const params = new URLSearchParams({ limit: "100", offset: String(page * 100) });
       if (search.trim()) params.set("search", search.trim());
       if (personFilter !== "all") params.set("person_id", personFilter);
+      if (sentimentFilter !== "all") params.set("sentiment", sentimentFilter);
+      params.set("sort", sort);
       setCommentsPage(await api<CommentsPage>(`/api/runs/${runId}/comments?${params}`));
     } catch (caught) {
       setError(errorMessage(caught));
@@ -278,6 +287,11 @@ export default function App() {
     setCandidates(null);
     setCommentsPage(null);
     setAiInsight(null);
+    setCommentSearch("");
+    setCommentPersonFilter("all");
+    setCommentSentimentFilter("all");
+    setCommentSort("source");
+    setCommentPage(0);
     setReplyMode("full");
     setNotice(null);
     setError(null);
@@ -303,9 +317,13 @@ export default function App() {
           commentsLoading={commentsLoading}
           commentSearch={commentSearch}
           commentPersonFilter={commentPersonFilter}
+          commentSentimentFilter={commentSentimentFilter}
+          commentSort={commentSort}
           commentPage={commentPage}
           setCommentSearch={(value) => { setCommentSearch(value); setCommentPage(0); }}
           setCommentPersonFilter={(value) => { setCommentPersonFilter(value); setCommentPage(0); }}
+          setCommentSentimentFilter={(value) => { setCommentSentimentFilter(value); setCommentPage(0); }}
+          setCommentSort={(value) => { setCommentSort(value); setCommentPage(0); }}
           setCommentPage={setCommentPage}
           onNewAnalysis={newAnalysis}
           onOpenSettings={() => setSettingsOpen(true)}
