@@ -155,7 +155,6 @@ bun run test:e2e
 ```
 
 `bun run test` は live API を使わず、fixture で integration test を通します。評価 fixture では人物言及の precision 90%以上・recall 85%以上と、主要感情3分類の macro-F1 80%以上を下限として検証します。`bun run test:e2e` はデスクトップ 1280px とモバイル 420×912pxで暫定レポートから根拠コメントまでの導線を検証します。
-live API を使う検証は `backend/live_tests/` に分離し、必要なときだけ `bun run test:live` で実行します。
 
 ## コメント取得データの保存と再利用
 
@@ -194,13 +193,7 @@ data/runs/<run_id>/
   ai_insight.json
 ```
 
-LLM 補助分析の結果は、prompt version と入力内容から作った hash で次にも保存します。
-
-```text
-data/llm_cache/<input_hash>.json
-```
-
-同一入力では Codex app server を再呼び出しせず、cache 結果を `llm_assist.json` と DB に再保存します。汎用 cache として `llm_cache` DB table にも保存し、既存 file cache は互換用に残します。
+LLM 補助分析の結果は、prompt version と入力内容から作った hash で DB の `llm_cache` に保存します。同一入力では Codex app server を再呼び出さず、cache 結果を run artifact と DB に再保存します。
 Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
 LLM 補助だけが失敗した場合も、候補抽出・alias・ランキングの通常レポートは有効なまま残し、`sections.llm_assist.status` に `failed` と理由を保存します。
 AI インサイトは分析確定後の任意実行です。個別コメント全文ではなく、言及ランキング、共起、クラスタ、魅力カテゴリ、品質確認件数などの集計済みサマリーだけを Codex app server に渡し、結果を `ai_insight.json` と DB に保存します。

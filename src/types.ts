@@ -20,7 +20,6 @@ export type DataSummary = {
   run_count: number;
   youtube_cache: { bytes: number; file_count: number };
   runs: { bytes: number; file_count: number };
-  llm_cache: { bytes: number; file_count: number };
 };
 
 export type ReplyMode = "none" | "inline_subset" | "full";
@@ -48,7 +47,7 @@ export type RunJob = {
   queue_position?: number;
 };
 
-export type VideoSummary = {
+type VideoSummary = {
   youtube_video_id: string;
   url: string;
   title: string;
@@ -57,7 +56,7 @@ export type VideoSummary = {
   comment_count_available: boolean;
 };
 
-export type FetchSummary = {
+type FetchSummary = {
   source: string;
   fetched_at?: string;
   max_comments_requested: number;
@@ -77,7 +76,7 @@ export type FetchSummary = {
   like_count_distribution?: Array<{ label: string; count: number }>;
 };
 
-export type Alias = {
+type Alias = {
   alias_id: string;
   alias_text: string;
   status: string;
@@ -85,7 +84,7 @@ export type Alias = {
   confidence: number;
 };
 
-export type Person = {
+type Person = {
   person_id: string;
   display_name: string;
   entity_type: string;
@@ -112,13 +111,13 @@ export type RankingRow = {
   representative_comments: EvidenceComment[];
 };
 
-export type EvidenceComment = {
+type EvidenceComment = {
   comment_id: string;
   text_original: string;
   like_count: number;
 };
 
-export type Topic = {
+type Topic = {
   cluster_id: string;
   label: string;
   comment_count: number;
@@ -128,7 +127,7 @@ export type Topic = {
   representative_comments: EvidenceComment[];
 };
 
-export type CooccurrencePair = {
+type CooccurrencePair = {
   person_a_id: string;
   person_a_name: string;
   person_b_id: string;
@@ -139,7 +138,7 @@ export type CooccurrencePair = {
   representative_comments: EvidenceComment[];
 };
 
-export type AppealPerson = {
+type AppealPerson = {
   person_id: string;
   display_name: string;
   comment_count: number;
@@ -207,7 +206,7 @@ export type Report = {
   evidence: { comments_endpoint: string; comment_count: number };
 };
 
-export type ReportComment = {
+type ReportComment = {
   comment_id: string;
   text_original: string;
   like_count: number;

@@ -254,7 +254,7 @@ function PersonTable({ rows, onSelect, selectedId }: { rows: RankingRow[]; onSel
   );
 }
 
-export function SentimentBar({ distribution, large = false, compact = false }: { distribution: SentimentDistribution; large?: boolean; compact?: boolean }) {
+function SentimentBar({ distribution, large = false, compact = false }: { distribution: SentimentDistribution; large?: boolean; compact?: boolean }) {
   return (
     <div className={large ? "sentiment sentiment--large" : compact ? "sentiment sentiment--compact" : "sentiment"}>
       <div className="sentiment-bar" role="img" aria-label={sentimentAriaLabel(distribution)}>

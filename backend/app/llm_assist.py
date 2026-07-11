@@ -446,18 +446,3 @@ def normalize_ai_insight_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "watch_points": list(payload.get("watch_points") or []),
         "suggested_next_questions": list(payload.get("suggested_next_questions") or []),
     }
-
-
-def read_cached_llm_assist(cache_dir: Path, cache_key: str) -> dict[str, Any] | None:
-    path = cache_dir / f"{cache_key}.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_cached_llm_assist(cache_dir: Path, cache_key: str, payload: dict[str, Any]) -> None:
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / f"{cache_key}.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )

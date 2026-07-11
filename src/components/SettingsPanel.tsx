@@ -28,7 +28,6 @@ export function SettingsPanel({ settings, data, busy, open, onClose, onDataActio
           <div><span>AI補助</span><strong>{settings?.llm_provider ?? "codex_app_server"}</strong></div>
           <div><span>分析run</span><strong>{data?.run_count ?? 0}件・{formatBytes(data?.runs.bytes ?? 0)}</strong></div>
           <div><span>YouTubeキャッシュ</span><strong>{data?.youtube_cache.file_count ?? 0}ファイル・{formatBytes(data?.youtube_cache.bytes ?? 0)}</strong></div>
-          <div><span>AIキャッシュ</span><strong>{data?.llm_cache.file_count ?? 0}ファイル・{formatBytes(data?.llm_cache.bytes ?? 0)}</strong></div>
           <div><span>保存データ合計</span><strong>{formatBytes(data?.total_bytes ?? 0)}</strong></div>
         </div>
         <div className="danger-zone">

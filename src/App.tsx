@@ -98,12 +98,9 @@ export default function App() {
         body: JSON.stringify({
           url,
           max_comments: maxComments,
-          cluster_count: 8,
           reply_fetch_mode: replyMode,
           fetch_order: "relevance",
-          force_refresh: forceRefresh,
-          use_llm: false,
-          use_embeddings: false
+          force_refresh: forceRefresh
         })
       });
       const completed = await waitForJob(created.job_id);

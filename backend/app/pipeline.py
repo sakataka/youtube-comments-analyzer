@@ -24,8 +24,6 @@ from .llm_assist import (
     llm_cache_key,
     parse_ai_insight_json,
     parse_llm_assist_json,
-    read_cached_llm_assist,
-    write_cached_llm_assist,
 )
 from .mention_classification import alias_match_confidence, alias_matches
 from .report_builder import build_report_payload, fetch_coverage_summary
@@ -478,8 +476,6 @@ class AnalysisStore:
             "top_comment_definition": "like_count_desc",
             "top_comment_count": 50,
             "like_weight_formula": "1 + log1p(like_count)",
-            "llm_enabled": bool(config["use_llm"]),
-            "embedding_enabled": bool(config["use_embeddings"]),
             "prompt_version": "2026-05-16.mvp0",
         }
         self.conn.execute(
@@ -1122,9 +1118,7 @@ class AnalysisStore:
         report = self.build_report(run_id)
         prompt = build_llm_assist_prompt(report)
         cache_key = llm_cache_key(prompt)
-        cache_dir = self.data_dir / "llm_cache"
-        cached = read_cached_llm_assist(cache_dir, cache_key)
-        cached = cached or self.read_llm_cache(cache_key)
+        cached = self.read_llm_cache(cache_key)
         if cached:
             result = {**cached, "source": "cache", "input_hash": cache_key}
             self.save_llm_assist(run_id, cache_key, result, raw_text=None, status="completed")
@@ -1145,7 +1139,6 @@ class AnalysisStore:
             self.persist_report(run_id, self.build_report(run_id))
             return result
         result = {**parsed, "source": "codex_app_server", "input_hash": cache_key}
-        write_cached_llm_assist(cache_dir, cache_key, result)
         self.write_llm_cache(cache_key, result, raw_text)
         self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")
         self.apply_ai_sentiment_recommendations(run_id, result)
@@ -1203,9 +1196,7 @@ class AnalysisStore:
         report = self.build_report(run_id)
         prompt = build_ai_insight_prompt(report)
         cache_key = ai_insight_cache_key(prompt)
-        cache_dir = self.data_dir / "llm_cache"
-        cached = read_cached_llm_assist(cache_dir, cache_key)
-        cached = cached or self.read_llm_cache(cache_key)
+        cached = self.read_llm_cache(cache_key)
         if cached:
             result = {**cached, "source": "cache", "input_hash": cache_key}
             self.save_ai_insight(run_id, cache_key, result, raw_text=None, status="completed")
@@ -1223,7 +1214,6 @@ class AnalysisStore:
             self._write_run_artifact(run_id, "ai_insight.json", result)
             return result
         result = {**parsed, "source": "codex_app_server", "input_hash": cache_key, "status": "completed"}
-        write_cached_llm_assist(cache_dir, cache_key, result)
         self.write_llm_cache(cache_key, result, raw_text)
         self.save_ai_insight(run_id, cache_key, result, raw_text=raw_text, status="completed")
         self._write_run_artifact(run_id, "ai_insight.json", result)

@@ -43,12 +43,9 @@ class InspectRequest(BaseModel):
 class RunCreateRequest(BaseModel):
     url: str
     max_comments: int = Field(default=5000, ge=1, le=5000)
-    cluster_count: int = Field(default=8, ge=5, le=12)
     reply_fetch_mode: Literal["none", "inline_subset", "full"] = "none"
     fetch_order: Literal["relevance", "time"] = "relevance"
     force_refresh: bool = False
-    use_llm: bool = False
-    use_embeddings: bool = False
 
 
 class CandidateActionsRequest(BaseModel):
@@ -79,17 +76,13 @@ def settings() -> dict[str, Any]:
         "youtube_api_key_configured": bool(os.getenv("YOUTUBE_API_KEY")),
         "youtube_api_key_env_name": "YOUTUBE_API_KEY",
         "data_dir": str(DATA_DIR),
-        "database_path": str(DB_PATH),
         "max_comments": {"default": 5000, "min": 1, "max": 5000},
-        "cluster_count": {"default": 8, "min": 5, "max": 12},
         "reply_fetch_modes": [
             {"value": "none", "label": "トップレベルのみ", "uses_extra_quota": False},
             {"value": "inline_subset", "label": "同梱返信だけ含める", "uses_extra_quota": False},
             {"value": "full", "label": "返信を追加取得して含める", "uses_extra_quota": True},
         ],
-        "fetch_orders": ["relevance", "time"],
         "llm_provider": "codex_app_server",
-        "embeddings_enabled": False,
     }
 
 
@@ -97,13 +90,11 @@ def settings() -> dict[str, Any]:
 def data_summary() -> dict[str, Any]:
     youtube_cache = DATA_DIR / "youtube_cache"
     runs = DATA_DIR / "runs"
-    llm_cache = DATA_DIR / "llm_cache"
     return {
         "data_dir": str(DATA_DIR),
         "database_bytes": file_size(DB_PATH),
         "youtube_cache": directory_summary(youtube_cache),
         "runs": directory_summary(runs),
-        "llm_cache": directory_summary(llm_cache),
         "archive": directory_summary(DATA_DIR / "archive"),
         "total_bytes": directory_size(DATA_DIR),
         "run_count": store.count_runs(),
