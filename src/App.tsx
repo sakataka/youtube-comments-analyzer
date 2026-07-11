@@ -41,7 +41,7 @@ export default function App() {
   const [commentSearch, setCommentSearch] = useState("");
   const [commentPersonFilter, setCommentPersonFilter] = useState("all");
   const [commentSentimentFilter, setCommentSentimentFilter] = useState("all");
-  const [commentSort, setCommentSort] = useState("source");
+  const [commentSort, setCommentSort] = useState("likes");
   const [commentPage, setCommentPage] = useState(0);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -145,7 +145,7 @@ export default function App() {
       setCommentSearch("");
       setCommentPersonFilter("all");
       setCommentSentimentFilter("all");
-      setCommentSort("source");
+      setCommentSort("likes");
       setCommentPage(0);
       setView("overview");
       setJob(null);
@@ -290,7 +290,7 @@ export default function App() {
     setCommentSearch("");
     setCommentPersonFilter("all");
     setCommentSentimentFilter("all");
-    setCommentSort("source");
+    setCommentSort("likes");
     setCommentPage(0);
     setReplyMode("full");
     setNotice(null);

@@ -1452,7 +1452,7 @@ class AnalysisStore:
         person_id: str | None = None,
         search: str | None = None,
         sentiment: str | None = None,
-        sort: str = "source",
+        sort: str = "likes",
     ) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         where = ["c.comment_snapshot_id = ?"]

@@ -31,9 +31,8 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
   await expect(page.getByRole("tab", { name: "コメント", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("感情")).toHaveText(/ポジティブ/);
   await expect(page.locator(".comment-row").first().getByText("ポジティブ", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("並び順")).toHaveText(/高評価順/);
 
-  await page.getByLabel("並び順").click();
-  await page.getByRole("option", { name: "高評価順" }).click();
   await expect.poll(async () => {
     const likeCounts = await page.locator(".comment-like").evaluateAll((items) => items.map((item) => Number(item.textContent?.replace(/\D/g, "") || 0)));
     return likeCounts.every((value, index) => index === 0 || likeCounts[index - 1] >= value);

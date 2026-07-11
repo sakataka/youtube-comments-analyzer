@@ -296,7 +296,7 @@ def get_comments(
     person_id: str | None = Query(default=None),
     search: str | None = Query(default=None),
     sentiment: Literal["positive", "neutral", "negative", "mixed", "unclear"] | None = Query(default=None),
-    sort: Literal["source", "likes"] = Query(default="source"),
+    sort: Literal["source", "likes"] = Query(default="likes"),
 ) -> dict[str, Any]:
     try:
         return store.get_comments_page(
