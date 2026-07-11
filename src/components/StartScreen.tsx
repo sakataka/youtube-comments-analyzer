@@ -49,10 +49,7 @@ export function StartScreen({
       <AppHeader onOpenSettings={onOpenSettings} />
 
       <section className="start-hero" aria-labelledby="start-title">
-        <div className="start-copy">
-          <h1 id="start-title">YouTubeコメントから、受け取られ方を読み解く。</h1>
-          <p>誰が、どんな感情で、何について語られたのか。件数と根拠コメントを一つのレポートにまとめます。</p>
-        </div>
+        <h1 id="start-title">YouTubeコメントを分析</h1>
         <form className="analysis-form" onSubmit={onSubmit}>
           <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">

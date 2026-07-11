@@ -15,7 +15,10 @@ test("設定Dialogはフォーカスを管理しEscで閉じる", async ({ page 
 
 test("暫定レポートから人物・コメントの根拠へ移動できる", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "YouTubeコメントから、受け取られ方を読み解く。" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "YouTubeコメントを分析" })).toBeVisible();
+
+  await page.getByText("詳細設定").click();
+  await expect(page.getByRole("radio", { name: /返信を追加取得/ })).toBeChecked();
 
   await page.getByLabel("YouTube動画のURL").fill("https://www.youtube.com/watch?v=vlpLbiqNhLo");
   await page.getByRole("button", { name: "分析する" }).click();

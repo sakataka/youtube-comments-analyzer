@@ -608,7 +608,7 @@ MVP では必須ではないが、DB 構造は差分更新を妨げない形に�
 MVP の初期上限:
 
 - トップレベルコメント最大 1000 件
-- 返信コメントは初期 `reply_fetch_mode=none`
+- 返信コメントは初期 `reply_fetch_mode=full`
 
 返信取得モードは boolean ではなく enum にする。
 
@@ -1436,7 +1436,7 @@ MVP-2 で embedding を追加する場合は `clustering` を stage に追加す
 初期設定:
 
 - 最大コメント数: 1000
-- 返信取得モード: `none`
+- 返信取得モード: `full`
 - fetch order: `relevance`
 - AI 分析: MVP-0 ではオフ、MVP-1 以降はオン
 - embedding: MVP-0/MVP-1 ではオフ、MVP-2 以降はオン

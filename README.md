@@ -10,7 +10,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 
 - YouTube URL から `video_id` を抽出する
 - `YOUTUBE_API_KEY` があれば YouTube Data API v3 で最大 5000 件のコメントを取得する
-- 返信モードは `none`、`inline_subset`、`full` を選べる
+- 返信コメントはデフォルトで追加取得し、返信モードは `none`、`inline_subset`、`full` から選べる
 - API key がない場合は `fixtures/sample_comments_drawme.jsonl` で動く
 - 取得コメントを SQLite と JSONL artifact に保存する
 - live API の取得結果を `data/youtube_cache/` に保存し、同条件では再利用する
@@ -124,7 +124,7 @@ Vite は空きポートを自動割り当てします。表示された `Local:`
 1. バックエンドとフロントエンドを起動する。
 2. 画面の URL 欄に YouTube URL を入力する。
 3. 最大コメント数を確認する。デフォルトは `5000`。
-4. 返信コメントを含めたい場合は `同梱返信だけ含める` または `返信を追加取得して含める` を選ぶ。
+4. 返信コメントはデフォルトで追加取得される。必要に応じて返信モードを変更する。
 5. 同条件 cache を更新したい場合だけ `差分更新する` を選ぶ。
 6. 「分析する」を押す。
 7. Data Source が `Cache` の場合は同条件の保存済みデータを使っており、YouTube API は再消費していない。

@@ -25,7 +25,7 @@ export default function App() {
   useSystemTheme();
   const [url, setUrl] = useState("");
   const [maxComments, setMaxComments] = useState(5000);
-  const [replyMode, setReplyMode] = useState<ReplyMode>("none");
+  const [replyMode, setReplyMode] = useState<ReplyMode>("full");
   const [forceRefresh, setForceRefresh] = useState(false);
   const [settings, setSettings] = useState<SettingsInfo | null>(null);
   const [dataSummary, setDataSummary] = useState<DataSummary | null>(null);
@@ -145,7 +145,7 @@ export default function App() {
       setReviewOpen(false);
       setUrl(nextRun.video?.url ?? "");
       setMaxComments(nextRun.fetch_summary?.max_comments_requested ?? maxComments);
-      setReplyMode((nextRun.fetch_summary?.reply_fetch_mode as ReplyMode) ?? "none");
+      setReplyMode((nextRun.fetch_summary?.reply_fetch_mode as ReplyMode) ?? "full");
       window.history.replaceState(null, "", `?run=${encodeURIComponent(runId)}`);
       await refreshHistory();
     } catch (caught) {
@@ -278,6 +278,7 @@ export default function App() {
     setCandidates(null);
     setCommentsPage(null);
     setAiInsight(null);
+    setReplyMode("full");
     setNotice(null);
     setError(null);
     setView("overview");
