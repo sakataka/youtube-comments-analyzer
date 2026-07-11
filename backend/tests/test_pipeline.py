@@ -11,6 +11,7 @@ from backend.app.llm_assist import extract_completed_agent_text, parse_ai_insigh
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.report_builder import build_comment_clusters, person_feature_words
+from backend.app.sentiment import classify_sentiment
 from backend.app.text_filters import evaluation_terms, is_noise_keyword, keyword_tokens, person_alias_terms
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
@@ -23,6 +24,69 @@ class PipelineTest(unittest.TestCase):
         store = AnalysisStore(db_path, data_dir)
         self.addCleanup(store.close)
         return store
+
+    def test_sentiment_rules_handle_negation_mixed_and_target_scope(self):
+        self.assertEqual(classify_sentiment("可愛くない")["label"], "negative")
+        self.assertEqual(classify_sentiment("嫌いじゃない")["label"], "positive")
+        self.assertEqual(classify_sentiment("最高だけど少し苦手")["label"], "mixed")
+        self.assertEqual(classify_sentiment("最高")["label"], "positive")
+        self.assertEqual(classify_sentiment("Aさんは最高。Bさんは苦手", ["Aさん"])["label"], "positive")
+
+    def test_sentiment_eval_fixture_meets_major_label_target(self):
+        rows = [json.loads(line) for line in (ROOT / "fixtures" / "sentiment_eval_drawme.jsonl").read_text(encoding="utf-8").splitlines()]
+        major = {"positive", "neutral", "negative"}
+        predictions = [
+            (row["label"], classify_sentiment(row["text"], row["target_aliases"])["label"])
+            for row in rows
+            if row["label"] in major
+        ]
+        f1_scores = []
+        for label in sorted(major):
+            true_positive = sum(expected == label and actual == label for expected, actual in predictions)
+            false_positive = sum(expected != label and actual == label for expected, actual in predictions)
+            false_negative = sum(expected == label and actual != label for expected, actual in predictions)
+            precision = true_positive / max(true_positive + false_positive, 1)
+            recall = true_positive / max(true_positive + false_negative, 1)
+            f1_scores.append(2 * precision * recall / max(precision + recall, 1e-9))
+        self.assertGreaterEqual(sum(f1_scores) / len(f1_scores), 0.8)
+
+    def test_mention_eval_fixture_meets_precision_and_recall_targets(self):
+        rows = [json.loads(line) for line in (ROOT / "fixtures" / "sentiment_eval_drawme.jsonl").read_text(encoding="utf-8").splitlines()]
+        aliases = {
+            "みりちゃむ": ["みりちゃむ"],
+            "福留光帆": ["福留光帆", "福留"],
+            "川戸": ["川戸"],
+            "二瓶有加": ["二瓶有加", "二瓶"],
+            "立野沙紀": ["立野沙紀", "立野"],
+            "佐久間宣行": ["佐久間宣行", "佐久間"],
+            "ニシダ": ["ニシダ"],
+        }
+        true_positive = false_positive = false_negative = 0
+        for row in rows:
+            normalized = row["text"].lower()
+            predicted = {
+                person
+                for person, person_aliases in aliases.items()
+                if any(alias_matches(normalized, alias.lower()) for alias in person_aliases)
+            }
+            expected = set(row["mentions"])
+            true_positive += len(predicted & expected)
+            false_positive += len(predicted - expected)
+            false_negative += len(expected - predicted)
+        precision = true_positive / max(true_positive + false_positive, 1)
+        recall = true_positive / max(true_positive + false_negative, 1)
+        self.assertGreaterEqual(precision, 0.9)
+        self.assertGreaterEqual(recall, 0.85)
+
+    def test_analysis_jobs_and_review_status_are_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            store = self.store(data_dir / "app.sqlite3", data_dir)
+            created = store.create_job("job_test", 1)
+            self.assertEqual(created["status"], "queued")
+            updated = store.update_job("job_test", status="running", stage="fetching_comments", progress=0.25)
+            self.assertEqual(updated["stage"], "fetching_comments")
+            self.assertEqual(updated["progress"], 0.25)
 
     def test_candidate_token_extraction(self):
         tokens = extract_candidate_tokens("福留光帆ちゃんとみりちゃむさん、風吹ケイ #NOBROCK")
@@ -253,7 +317,10 @@ class PipelineTest(unittest.TestCase):
             if "バランス" in by_name:
                 self.assertEqual(by_name["バランス"]["status"], "rejected")
             report = store.classify_and_report(run_id)
-            self.assertEqual(report["schema_version"], "report.v1")
+            self.assertEqual(report["schema_version"], "report.v2")
+            self.assertEqual(report["review"]["status"], "provisional")
+            self.assertEqual(report["sentiment"]["method"], "hybrid")
+            self.assertNotIn("comments", report)
             self.assertEqual(report["sections"]["appeal_summary"]["status"], "available")
             self.assertGreater(len(report["appeal_summary"]["people"]), 0)
             self.assertIn("category_counts", report["appeal_summary"]["people"][0])
@@ -277,14 +344,15 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("multi_mention_count", ranking_row)
             self.assertIn("raw_like_sum", ranking_row)
             self.assertGreaterEqual(ranking_row["raw_like_sum"], 0)
-            mentioned_comments = [comment for comment in report["comments"] if comment["mentioned_persons"]]
+            all_comments = store.get_comments_page(run_id, limit=500, offset=0)["comments"]
+            mentioned_comments = [comment for comment in all_comments if comment["mentioned_persons"]]
             self.assertGreater(len(mentioned_comments), 0)
             target_comment = mentioned_comments[0]
             target_person = target_comment["mentioned_persons"][0]
             first_page = store.get_comments_page(run_id, limit=5, offset=0)
             self.assertEqual(first_page["limit"], 5)
             self.assertEqual(len(first_page["comments"]), 5)
-            self.assertEqual(first_page["total"], len(report["comments"]))
+            self.assertEqual(first_page["total"], report["evidence"]["comment_count"])
             person_page = store.get_comments_page(run_id, limit=20, offset=0, person_id=target_person["person_id"])
             self.assertGreater(person_page["total"], 0)
             self.assertTrue(
@@ -305,7 +373,8 @@ class PipelineTest(unittest.TestCase):
                     }
                 ],
             )
-            updated_comment = next(comment for comment in updated_report["comments"] if comment["comment_id"] == target_comment["comment_id"])
+            updated_page = store.get_comments_page(run_id, limit=500, offset=0)
+            updated_comment = next(comment for comment in updated_page["comments"] if comment["comment_id"] == target_comment["comment_id"])
             self.assertNotIn(target_person["person_id"], {person["person_id"] for person in updated_comment["mentioned_persons"]})
             self.assertTrue((data_dir / "runs" / run_id / "report.json").exists())
             self.assertTrue((data_dir / "runs" / run_id / "normalized_comments.jsonl").exists())
@@ -319,6 +388,37 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("report.json", exported["artifacts"])
             self.assertIn("normalized_comments.jsonl", exported["artifacts"])
             self.assertIn("aliases.json", exported["artifacts"])
+            sentiment_item = report["sentiment"]["review_items"][0]
+            overridden = store.apply_sentiment_actions(
+                run_id,
+                [
+                    {
+                        "comment_id": sentiment_item["comment_id"],
+                        "target_type": sentiment_item["target_type"],
+                        "target_id": sentiment_item["target_id"],
+                        "label": "positive",
+                    }
+                ],
+            )
+            overridden_item = store.conn.execute(
+                """
+                select label, confidence, method from sentiment_labels
+                where analysis_run_id = ? and comment_id = ? and target_type = ?
+                  and ((target_id = ?) or (target_id is null and ? is null))
+                """,
+                (
+                    run_id,
+                    sentiment_item["comment_id"],
+                    sentiment_item["target_type"],
+                    sentiment_item["target_id"],
+                    sentiment_item["target_id"],
+                ),
+            ).fetchone()
+            self.assertEqual(dict(overridden_item), {"label": "positive", "confidence": 1.0, "method": "human"})
+            self.assertEqual(overridden["review"]["status"], "provisional")
+            verified_run = store.verify_review(run_id)
+            self.assertEqual(verified_run["review_status"], "verified")
+            self.assertEqual(store.get_latest_report(run_id)["review"]["status"], "verified")
 
     def test_inline_subset_replies_are_saved_and_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -389,7 +489,8 @@ class PipelineTest(unittest.TestCase):
             report = store.classify_and_report(run_id)
             self.assertEqual(report["fetch_summary"]["fetched_top_level_count"], 1)
             self.assertEqual(report["fetch_summary"]["fetched_reply_count"], 1)
-            reply_comment = next(comment for comment in report["comments"] if comment["is_reply"])
+            comments_page = store.get_comments_page(run_id, limit=20, offset=0)
+            reply_comment = next(comment for comment in comments_page["comments"] if comment["is_reply"])
             self.assertEqual(reply_comment["parent_comment_id"], "top-1")
             self.assertTrue(reply_comment["mentioned_persons"])
 
@@ -459,7 +560,12 @@ class PipelineTest(unittest.TestCase):
                 ("snapshot_x", "video_x", "relevance", 1, 0, "none", 0, 0, 0, "fixture", "now"),
             )
             store.conn.execute(
-                "insert into analysis_runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                insert into analysis_runs (
+                  id, video_id, comment_snapshot_id, status, stage, progress,
+                  config_json, created_at, started_at, completed_at, error_message
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 ("run_x", "video_x", "snapshot_x", "running", "fetching", 0.2, "{}", "now", "now", None, None),
             )
             store.conn.commit()
@@ -639,7 +745,8 @@ class PipelineTest(unittest.TestCase):
             )
             store.classify_and_report(run_id)
             base_report = store.build_report(run_id)
-            fake = FakeLlmClient(base_report["comments"][0]["comment_id"])
+            first_comment = store.get_comments_page(run_id, limit=1, offset=0)["comments"][0]
+            fake = FakeLlmClient(first_comment["comment_id"])
             result = store.run_llm_assist(run_id, client=fake)
             cached = store.run_llm_assist(run_id, client=fake)
             report = store.build_report(run_id)
@@ -660,7 +767,7 @@ class PipelineTest(unittest.TestCase):
 {"candidate_recommendations":[],"alias_recommendations":[],"ambiguous_comments":[],"notes":["ok"]}
 ```"""
         )
-        self.assertEqual(parsed["schema_version"], "llm_assist.v1")
+        self.assertEqual(parsed["schema_version"], "llm_assist.v2")
 
     def test_ai_insight_prompt_and_cache_flow(self):
         class FakeInsightClient:

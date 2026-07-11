@@ -33,7 +33,6 @@ app.add_middleware(
 store = AnalysisStore(DB_PATH, DATA_DIR)
 youtube_client = YouTubeCommentClient(DATA_DIR, FIXTURE_PATH)
 job_executor = ThreadPoolExecutor(max_workers=1)
-jobs: dict[str, dict[str, Any]] = {}
 
 
 class InspectRequest(BaseModel):
@@ -57,6 +56,10 @@ class CandidateActionsRequest(BaseModel):
 
 
 class CommentActionsRequest(BaseModel):
+    actions: list[dict[str, Any]]
+
+
+class SentimentActionsRequest(BaseModel):
     actions: list[dict[str, Any]]
 
 
@@ -148,31 +151,21 @@ def inspect_video(request: InspectRequest) -> dict[str, Any]:
 @app.post("/api/runs")
 def create_run(request: RunCreateRequest) -> dict[str, str]:
     job_id = f"job_{uuid.uuid4().hex[:12]}"
-    queued_count = sum(1 for job in jobs.values() if job["status"] in {"queued", "running"})
-    jobs[job_id] = {
-        "job_id": job_id,
-        "status": "queued",
-        "stage": "queued",
-        "progress": 0.0,
-        "run_id": None,
-        "error_message": None,
-        "queue_position": queued_count + 1,
-    }
+    store.create_job(job_id, store.active_job_count() + 1)
     job_executor.submit(process_run_job, job_id, request)
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    return job
+    try:
+        return store.get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def process_run_job(job_id: str, request: RunCreateRequest) -> None:
-    job = jobs[job_id]
-    job.update({"status": "running", "stage": "fetching_comments", "progress": 0.15, "queue_position": 1})
+    store.update_job(job_id, status="running", stage="fetching_comments", progress=0.15, queue_position=1)
     try:
         bundle = youtube_client.fetch_video_bundle(
             request.url,
@@ -183,15 +176,15 @@ def process_run_job(job_id: str, request: RunCreateRequest) -> None:
                 force_refresh=request.force_refresh,
             ),
         )
-        job.update({"stage": "creating_run", "progress": 0.55})
+        store.update_job(job_id, stage="building_provisional_report", progress=0.55)
         run_id = store.create_run(bundle, request.model_dump())
-        job.update({"status": "completed", "stage": "waiting_for_review", "progress": 1.0, "run_id": run_id})
+        store.update_job(job_id, status="completed", stage="provisional_report_ready", progress=1.0, run_id=run_id)
     except ValueError as exc:
-        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": str(exc)})
+        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=str(exc))
     except RuntimeError as exc:
-        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": f"YouTube API 取得に失敗しました: {exc}"})
+        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=f"YouTube API 取得に失敗しました: {exc}")
     except Exception as exc:
-        job.update({"status": "failed", "stage": "failed", "progress": 1.0, "error_message": f"分析 run の作成に失敗しました: {exc}"})
+        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=f"分析 run の作成に失敗しました: {exc}")
 
 
 @app.get("/api/runs")
@@ -233,11 +226,27 @@ def comment_actions(run_id: str, request: CommentActionsRequest) -> dict[str, An
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/runs/{run_id}/sentiment-actions")
+def sentiment_actions(run_id: str, request: SentimentActionsRequest) -> dict[str, Any]:
+    try:
+        return store.apply_sentiment_actions(run_id, request.actions)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/runs/{run_id}/continue")
 def continue_run(run_id: str) -> dict[str, Any]:
     try:
         store.classify_and_report(run_id)
         return store.get_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/review/complete")
+def complete_review(run_id: str) -> dict[str, Any]:
+    try:
+        return store.verify_review(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from .llm_assist import (
 )
 from .mention_classification import alias_match_confidence, alias_matches
 from .report_builder import build_report_payload, fetch_coverage_summary
+from .sentiment import SENTIMENT_LABELS, classify_sentiment, sentiment_distribution
 
 
 def utc_now() -> str:
@@ -39,7 +42,7 @@ def new_id(prefix: str) -> str:
 
 def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": "llm_assist.v1",
+        "schema_version": "llm_assist.v2",
         "prompt_version": PROMPT_VERSION,
         "provider": "codex_app_server",
         "source": "codex_app_server",
@@ -49,6 +52,7 @@ def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
         "candidate_recommendations": [],
         "alias_recommendations": [],
         "ambiguous_comments": [],
+        "sentiment_recommendations": [],
         "notes": [],
     }
 
@@ -132,6 +136,17 @@ def init_db(conn: sqlite3.Connection) -> None:
           completed_at text,
           error_message text
         );
+        create table if not exists analysis_jobs (
+          id text primary key,
+          status text not null,
+          stage text not null,
+          progress real not null,
+          run_id text,
+          error_message text,
+          queue_position integer not null default 1,
+          created_at text not null,
+          updated_at text not null
+        );
         create table if not exists persons (
           id text primary key,
           analysis_run_id text not null,
@@ -186,6 +201,28 @@ def init_db(conn: sqlite3.Connection) -> None:
           comment_id text not null,
           person_id text not null,
           action_type text not null,
+          created_at text not null
+        );
+        create table if not exists sentiment_labels (
+          id text primary key,
+          analysis_run_id text not null,
+          comment_id text not null,
+          target_type text not null,
+          target_id text,
+          label text not null,
+          confidence real not null,
+          method text not null,
+          evidence_json text not null,
+          needs_ai integer not null default 0,
+          created_at text not null
+        );
+        create table if not exists sentiment_overrides (
+          id text primary key,
+          analysis_run_id text not null,
+          comment_id text not null,
+          target_type text not null,
+          target_id text,
+          label text not null,
           created_at text not null
         );
         create table if not exists llm_assists (
@@ -243,6 +280,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "videos", "comment_count_available", "integer not null default 0")
     ensure_column(conn, "videos", "youtube_view_count", "integer")
     ensure_column(conn, "videos", "youtube_like_count", "integer")
+    ensure_column(conn, "analysis_runs", "review_status", "text not null default 'provisional'")
+    ensure_column(conn, "analysis_runs", "reviewed_at", "text")
     conn.commit()
 
 
@@ -252,8 +291,25 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition:
         conn.execute(f"alter table {table} add column {column} {definition}")
 
 
+def serialize_store_methods(cls: type) -> type:
+    """Serialize access to the single SQLite connection across API and job threads."""
+    for name, method in list(vars(cls).items()):
+        if name.startswith("__") or not callable(method):
+            continue
+
+        @wraps(method)
+        def synchronized(self: Any, *args: Any, __method: Any = method, **kwargs: Any) -> Any:
+            with self._lock:
+                return __method(self, *args, **kwargs)
+
+        setattr(cls, name, synchronized)
+    return cls
+
+
+@serialize_store_methods
 class AnalysisStore:
     def __init__(self, db_path: Path, data_dir: Path):
+        self._lock = threading.RLock()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -280,7 +336,59 @@ class AnalysisStore:
             """,
             ("サーバー再起動により実行中 job を復旧対象にしました", now),
         )
+        self.conn.execute(
+            """
+            update analysis_jobs
+            set status = 'failed', stage = 'recovered_after_restart', progress = 1,
+                error_message = ?, updated_at = ?
+            where status in ('running', 'queued')
+            """,
+            ("サーバー再起動により実行中 job を復旧対象にしました", now),
+        )
         self.conn.commit()
+
+    def create_job(self, job_id: str, queue_position: int) -> dict[str, Any]:
+        now = utc_now()
+        self.conn.execute(
+            "insert into analysis_jobs values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, "queued", "queued", 0.0, None, None, queue_position, now, now),
+        )
+        self.conn.commit()
+        return self.get_job(job_id)
+
+    def update_job(self, job_id: str, **values: Any) -> dict[str, Any]:
+        allowed = {"status", "stage", "progress", "run_id", "error_message", "queue_position"}
+        updates = {key: value for key, value in values.items() if key in allowed}
+        if not updates:
+            return self.get_job(job_id)
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        self.conn.execute(
+            f"update analysis_jobs set {assignments}, updated_at = ? where id = ?",
+            [*updates.values(), utc_now(), job_id],
+        )
+        self.conn.commit()
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        row = self.conn.execute("select * from analysis_jobs where id = ?", (job_id,)).fetchone()
+        if not row:
+            raise KeyError(f"job not found: {job_id}")
+        return {
+            "job_id": row["id"],
+            "status": row["status"],
+            "stage": row["stage"],
+            "progress": row["progress"],
+            "run_id": row["run_id"],
+            "error_message": row["error_message"],
+            "queue_position": row["queue_position"],
+        }
+
+    def active_job_count(self) -> int:
+        return int(
+            self.conn.execute(
+                "select count(*) from analysis_jobs where status in ('queued', 'running')"
+            ).fetchone()[0]
+        )
 
     def create_run(self, bundle: dict[str, Any], config: dict[str, Any]) -> str:
         now = utc_now()
@@ -375,7 +483,13 @@ class AnalysisStore:
             "prompt_version": "2026-05-16.mvp0",
         }
         self.conn.execute(
-            "insert into analysis_runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            insert into analysis_runs (
+              id, video_id, comment_snapshot_id, status, stage, progress,
+              config_json, created_at, started_at, completed_at, error_message,
+              review_status, reviewed_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 run_id,
                 video_id,
@@ -388,10 +502,13 @@ class AnalysisStore:
                 now,
                 None,
                 None,
+                "provisional",
+                None,
             ),
         )
         self.conn.commit()
         self.extract_candidates(run_id)
+        self.classify_and_report(run_id)
         self._write_run_artifact(run_id, "raw_comments.jsonl", bundle["comments"], jsonl=True)
         self._write_run_artifact(run_id, "normalized_comments.jsonl", self.normalized_comments_for_snapshot(snapshot_id), jsonl=True)
         return run_id
@@ -683,6 +800,7 @@ class AnalysisStore:
                         ),
                     )
         self.apply_comment_mention_overrides(run_id)
+        self.rebuild_sentiment_labels(run_id)
         report = self.build_report(run_id)
         self.conn.execute(
             "insert into reports values (?, ?, ?, ?)",
@@ -714,6 +832,7 @@ class AnalysisStore:
                 (new_id("override"), run_id, comment_id, person_id, action_type, utc_now()),
             )
         self.apply_comment_mention_overrides(run_id)
+        self.rebuild_sentiment_labels(run_id)
         report = self.build_report(run_id)
         self.conn.execute(
             "insert into reports values (?, ?, ?, ?)",
@@ -761,6 +880,214 @@ class AnalysisStore:
                     ),
                 )
 
+    def rebuild_sentiment_labels(self, run_id: str) -> None:
+        run = self.get_run_row(run_id)
+        comments = self.comments_for_snapshot(run["comment_snapshot_id"])
+        mention_rows = self.conn.execute(
+            """
+            select m.comment_id, m.person_id, p.display_name
+            from comment_mentions m
+            join persons p on p.id = m.person_id
+            where m.analysis_run_id = ?
+            """,
+            (run_id,),
+        ).fetchall()
+        aliases = self.conn.execute(
+            """
+            select person_id, alias_text from aliases
+            where analysis_run_id = ? and status = 'accepted'
+            """,
+            (run_id,),
+        ).fetchall()
+        aliases_by_person: dict[str, list[str]] = {}
+        for alias in aliases:
+            aliases_by_person.setdefault(alias["person_id"], []).append(alias["alias_text"])
+        mentions_by_comment: dict[str, list[sqlite3.Row]] = {}
+        for mention in mention_rows:
+            mentions_by_comment.setdefault(mention["comment_id"], []).append(mention)
+
+        self.conn.execute("delete from sentiment_labels where analysis_run_id = ?", (run_id,))
+        now = utc_now()
+        for comment in comments:
+            overall = classify_sentiment(comment["text_original"])
+            self.insert_sentiment_label(run_id, comment["id"], "video", None, overall, now)
+            mentions = mentions_by_comment.get(comment["id"], [])
+            for mention in mentions:
+                person_aliases = aliases_by_person.get(mention["person_id"], [mention["display_name"]])
+                result = classify_sentiment(comment["text_original"], person_aliases)
+                self.insert_sentiment_label(
+                    run_id,
+                    comment["id"],
+                    "person",
+                    mention["person_id"],
+                    result,
+                    now,
+                )
+        self.apply_sentiment_overrides(run_id)
+        self.conn.commit()
+
+    def insert_sentiment_label(
+        self,
+        run_id: str,
+        comment_id: str,
+        target_type: str,
+        target_id: str | None,
+        result: dict[str, Any],
+        created_at: str,
+    ) -> None:
+        evidence = {
+            "terms": result.get("evidence") or [],
+            "scope_text": result.get("scope_text") or "",
+        }
+        self.conn.execute(
+            """
+            insert into sentiment_labels (
+              id, analysis_run_id, comment_id, target_type, target_id, label,
+              confidence, method, evidence_json, needs_ai, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("sentiment"),
+                run_id,
+                comment_id,
+                target_type,
+                target_id,
+                result["label"],
+                result["confidence"],
+                result.get("method") or "rule",
+                json.dumps(evidence, ensure_ascii=False),
+                1 if result.get("needs_ai") else 0,
+                created_at,
+            ),
+        )
+
+    def apply_sentiment_overrides(self, run_id: str) -> None:
+        rows = self.conn.execute(
+            """
+            select * from sentiment_overrides
+            where analysis_run_id = ? order by created_at asc
+            """,
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            self.conn.execute(
+                """
+                update sentiment_labels
+                set label = ?, confidence = 1, method = 'human', needs_ai = 0
+                where analysis_run_id = ? and comment_id = ? and target_type = ?
+                  and ((target_id = ?) or (target_id is null and ? is null))
+                """,
+                (
+                    row["label"],
+                    run_id,
+                    row["comment_id"],
+                    row["target_type"],
+                    row["target_id"],
+                    row["target_id"],
+                ),
+            )
+
+    def apply_sentiment_actions(self, run_id: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
+        self.get_run_row(run_id)
+        for action in actions:
+            label = action.get("label")
+            if label not in SENTIMENT_LABELS:
+                continue
+            self.conn.execute(
+                """
+                insert into sentiment_overrides (
+                  id, analysis_run_id, comment_id, target_type, target_id, label, created_at
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("sentiment_override"),
+                    run_id,
+                    action["comment_id"],
+                    action.get("target_type") or "video",
+                    action.get("target_id"),
+                    label,
+                    utc_now(),
+                ),
+            )
+        self.apply_sentiment_overrides(run_id)
+        self.conn.commit()
+        report = self.build_report(run_id)
+        self.persist_report(run_id, report)
+        return report
+
+    def get_sentiment_analysis(self, run_id: str) -> dict[str, Any]:
+        rows = self.conn.execute(
+            """
+            select s.*, c.text_original, c.like_count, p.display_name
+            from sentiment_labels s
+            join comments c on c.id = s.comment_id
+            left join persons p on p.id = s.target_id
+            where s.analysis_run_id = ?
+            order by c.like_count desc
+            """,
+            (run_id,),
+        ).fetchall()
+        overall_rows = [row for row in rows if row["target_type"] == "video"]
+        people: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if row["target_type"] != "person" or not row["target_id"]:
+                continue
+            person = people.setdefault(
+                row["target_id"],
+                {
+                    "person_id": row["target_id"],
+                    "display_name": row["display_name"],
+                    "rows": [],
+                },
+            )
+            person["rows"].append(row)
+        per_person = []
+        for person in people.values():
+            person_rows = person.pop("rows")
+            per_person.append({
+                **person,
+                "distribution": sentiment_distribution(row["label"] for row in person_rows),
+                "average_confidence": round(
+                    sum(float(row["confidence"]) for row in person_rows) / len(person_rows), 3
+                ),
+            })
+        per_person.sort(key=lambda item: item["distribution"]["total"], reverse=True)
+        review_rows = [row for row in rows if row["needs_ai"] or row["confidence"] < 0.7][:60]
+        return {
+            "method": "hybrid",
+            "rule_status": "available",
+            "ai_status": self.sentiment_ai_status(run_id),
+            "overall": sentiment_distribution(row["label"] for row in overall_rows),
+            "per_person": per_person,
+            "review_items": [
+                {
+                    "comment_id": row["comment_id"],
+                    "text_original": row["text_original"],
+                    "like_count": row["like_count"],
+                    "target_type": row["target_type"],
+                    "target_id": row["target_id"],
+                    "target_display_name": row["display_name"],
+                    "label": row["label"],
+                    "confidence": row["confidence"],
+                    "method": row["method"],
+                    "evidence": json.loads(row["evidence_json"]),
+                }
+                for row in review_rows
+            ],
+        }
+
+    def sentiment_ai_status(self, run_id: str) -> str:
+        row = self.conn.execute(
+            """
+            select status from llm_assists
+            where analysis_run_id = ? order by created_at desc limit 1
+            """,
+            (run_id,),
+        ).fetchone()
+        if not row:
+            return "not_run"
+        return "failed" if row["status"] == "failed" else "available"
+
     def build_report(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         video = self.conn.execute("select * from videos where id = ?", (run["video_id"],)).fetchone()
@@ -787,6 +1114,8 @@ class AnalysisStore:
             persons=persons,
             alias_suggestions=build_alias_suggestions(comments, persons),
             llm_assist=self.get_latest_llm_assist(run_id),
+            sentiment=self.get_sentiment_analysis(run_id),
+            review_status=run["review_status"],
         )
 
     def run_llm_assist(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
@@ -799,6 +1128,7 @@ class AnalysisStore:
         if cached:
             result = {**cached, "source": "cache", "input_hash": cache_key}
             self.save_llm_assist(run_id, cache_key, result, raw_text=None, status="completed")
+            self.apply_ai_sentiment_recommendations(run_id, result)
             self._write_run_artifact(run_id, "llm_assist.json", result)
             self.persist_report(run_id, self.build_report(run_id))
             return result
@@ -818,9 +1148,55 @@ class AnalysisStore:
         write_cached_llm_assist(cache_dir, cache_key, result)
         self.write_llm_cache(cache_key, result, raw_text)
         self.save_llm_assist(run_id, cache_key, result, raw_text=raw_text, status="completed")
+        self.apply_ai_sentiment_recommendations(run_id, result)
         self._write_run_artifact(run_id, "llm_assist.json", result)
         self.persist_report(run_id, self.build_report(run_id))
         return result
+
+    def apply_ai_sentiment_recommendations(self, run_id: str, assist: dict[str, Any]) -> None:
+        people = {
+            row["display_name"]: row["id"]
+            for row in self.conn.execute(
+                "select id, display_name from persons where analysis_run_id = ?",
+                (run_id,),
+            ).fetchall()
+        }
+        for item in assist.get("sentiment_recommendations") or []:
+            label = item.get("label")
+            confidence = item.get("confidence")
+            if label not in SENTIMENT_LABELS or confidence not in {"high", "medium"}:
+                continue
+            target_name = item.get("target_display_name")
+            target_type = "person" if target_name else "video"
+            target_id = people.get(target_name) if target_name else None
+            if target_name and not target_id:
+                continue
+            score = 0.9 if confidence == "high" else 0.78
+            evidence = json.dumps(
+                {"terms": [], "scope_text": "", "ai_reason": item.get("reason") or ""},
+                ensure_ascii=False,
+            )
+            self.conn.execute(
+                """
+                update sentiment_labels
+                set label = ?, confidence = ?, method = 'ai', evidence_json = ?, needs_ai = 0
+                where analysis_run_id = ? and comment_id = ? and target_type = ?
+                  and ((target_id = ?) or (target_id is null and ? is null))
+                  and needs_ai = 1
+                """,
+                (
+                    label,
+                    score,
+                    evidence,
+                    run_id,
+                    item.get("comment_id"),
+                    target_type,
+                    target_id,
+                    target_id,
+                ),
+            )
+        self.apply_sentiment_overrides(run_id)
+        self.conn.commit()
 
     def run_ai_insight(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
         self.get_latest_report(run_id)
@@ -1017,6 +1393,8 @@ class AnalysisStore:
             "stage": run["stage"],
             "progress": run["progress"],
             "error_message": run["error_message"],
+            "review_status": run["review_status"],
+            "reviewed_at": run["reviewed_at"],
             "created_at": run["created_at"],
             "video": {
                 "youtube_video_id": video["youtube_video_id"],
@@ -1056,10 +1434,25 @@ class AnalysisStore:
             raise KeyError(f"report not found: {run_id}")
         report = json.loads(row["report_json"])
         latest_llm_assist = self.get_latest_llm_assist(run_id)
-        if latest_llm_assist and report.get("llm_assist") != latest_llm_assist:
+        needs_v2 = report.get("schema_version") != "report.v2"
+        if needs_v2:
+            self.rebuild_sentiment_labels(run_id)
+        if needs_v2 or (latest_llm_assist and report.get("llm_assist") != latest_llm_assist):
             report = self.build_report(run_id)
             self.persist_report(run_id, report)
         return report
+
+    def verify_review(self, run_id: str) -> dict[str, Any]:
+        self.get_run_row(run_id)
+        now = utc_now()
+        self.conn.execute(
+            "update analysis_runs set review_status = 'verified', reviewed_at = ? where id = ?",
+            (now, run_id),
+        )
+        self.conn.commit()
+        report = self.build_report(run_id)
+        self.persist_report(run_id, report)
+        return self.get_run(run_id)
 
     def get_comments_page(
         self,

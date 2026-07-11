@@ -577,6 +577,8 @@ def build_report_payload(
     persons: list[dict[str, Any]],
     alias_suggestions: list[dict[str, Any]],
     llm_assist: dict[str, Any] | None,
+    sentiment: dict[str, Any],
+    review_status: str,
 ) -> dict[str, Any]:
     top_comment_count = int(analysis_config.get("top_comment_count", 50))
     ranking, mentions_by_comment = build_mention_ranking(mentions, comments, top_comment_count)
@@ -586,9 +588,27 @@ def build_report_payload(
     clusters = build_comment_clusters(comments, mentions_by_comment, int(analysis_config.get("cluster_count", 8)))
     llm_section = llm_section_status(llm_assist)
     quality_review = build_quality_review(comments, mention_details_by_comment, llm_assist)
+    sentiment_by_person = {
+        item["person_id"]: item for item in sentiment.get("per_person", [])
+    }
+    for row in ranking:
+        row["sentiment"] = sentiment_by_person.get(row["person_id"], {}).get(
+            "distribution",
+            {
+                "total": 0,
+                "counts": {label: 0 for label in ["positive", "neutral", "negative", "mixed", "unclear"]},
+                "rates": {label: 0.0 for label in ["positive", "neutral", "negative", "mixed", "unclear"]},
+            },
+        )
+    sentiment_review_count = len(sentiment.get("review_items") or [])
     return {
-        "schema_version": "report.v1",
+        "schema_version": "report.v2",
         "run_id": run_id,
+        "review": {
+            "status": review_status,
+            "is_verified": review_status == "verified",
+            "pending_item_count": len(quality_review["human_review_items"]) + sentiment_review_count,
+        },
         "video": {
             "youtube_video_id": video["youtube_video_id"],
             "url": video["url"],
@@ -620,27 +640,18 @@ def build_report_payload(
         "appeal_summary": appeal_summary,
         "cooccurrence": cooccurrence,
         "clusters": clusters,
+        "topics": {
+            "method": "keyword_categories",
+            "items": clusters["clusters"],
+            "note": "固定キーワードによる話題カテゴリです。意味的クラスタリングではありません。",
+        },
+        "sentiment": sentiment,
         "quality_review": quality_review,
         "rankings": {"mention_ranking": ranking},
-        "comments": [
-            {
-                "comment_id": comment["id"],
-                "text_original": comment["text_original"],
-                "like_count": comment["like_count"],
-                "is_reply": bool(comment["is_reply"]),
-                "parent_comment_id": comment["parent_comment_id"],
-                "mentioned_persons": [
-                    {
-                        "person_id": mention["person_id"],
-                        "display_name": mention["display_name"],
-                        "confidence": mention["confidence"],
-                        "match_method": mention["match_method"],
-                    }
-                    for mention in mention_details_by_comment.get(comment["id"], [])
-                ],
-            }
-            for comment in comments
-        ],
+        "evidence": {
+            "comments_endpoint": f"/api/runs/{run_id}/comments",
+            "comment_count": len(comments),
+        },
         "sections": {
             "mention_ranking": {"status": "available"},
             "person_candidates": {"status": "available"},
@@ -656,6 +667,7 @@ def build_report_payload(
             "quality_review": {"status": "available"},
             "cooccurrence": {"status": "available"},
             "clusters": {"status": "available"},
+            "sentiment": {"status": "available", "method": "hybrid"},
         },
     }
 

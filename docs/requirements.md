@@ -15,6 +15,14 @@ YouTube の動画コメント欄には、動画そのものへの反応だけで
 
 本ツールは、任意の YouTube 動画 URL を入力し、取得したコメントをもとに、コメント欄で言及されている人物・グループ・関係者を抽出し、人物別の言及量、表記ゆれ、共起関係、魅力として語られている内容を分析・可視化するローカル Web アプリである。
 
+### 1.1 現行実装契約（report.v2）
+
+現行 UI は、人物候補の確認を待たずに暫定レポートを先に表示する。レポートの主表示は `概要 / 人物 / 話題・共起 / コメント` の4領域とし、候補・alias・低 confidence コメント・対象別感情の修正は任意のレビューセンターへ集約する。
+
+感情は動画全体と人物別を分け、`positive / neutral / negative / mixed / unclear` を保存する。明示的な評価語と否定表現は再現可能なルールで処理し、曖昧な文脈だけを Codex app server の補助判定対象にする。AI が失敗した場合もルール結果を暫定レポートとして利用できる。
+
+`report.v2` は集計、確度、判定 method、根拠コメント ID を返す。コメント本文の全件配列は含めず、`GET /api/runs/{run_id}/comments` からページング取得する。既存 `report.v1` run は保存済みコメントと人物割り当てから v2 へ再計算し、元データを削除しない。
+
 ## 2. 目的
 
 ### 2.1 ユーザーが知りたいこと
@@ -1364,7 +1372,7 @@ Response は必ず `schema_version` を持つ。
 
 ```json
 {
-  "schema_version": "report.v1",
+  "schema_version": "report.v2",
   "run_id": "run_001",
   "video": {},
   "fetch_summary": {},
@@ -1603,7 +1611,7 @@ Embedding は MVP-2 で導入する。MVP-0/MVP-1 の実装を embedding に依�
 - 人物別言及ランキング
 - 人物別特徴語
 - 人物別代表コメント
-- report.v1 JSON 生成
+- report.v2 JSON 生成
 - Web レポート最小表示
 
 MVP-0 の完了条件:
@@ -1845,7 +1853,7 @@ README に必ず含める。
 - 言及ランキング
 - 特徴語抽出
 - 代表コメント抽出
-- report.v1 JSON 生成
+- report.v2 JSON 生成
 
 ここまでで MVP-0 完了とする。
 
@@ -1893,7 +1901,7 @@ README に必ず含める。
 - ユーザーが 1 分以内に候補確認を終えられる
 - 言及ランキングが表示される
 - 代表コメントで根拠を確認できる
-- LLM なしでも report.v1 JSON が生成される
+- LLM なしでも report.v2 JSON が生成される
 - LLM dependent section が skipped として表示される
 
 MVP-1 完了条件:
@@ -1936,7 +1944,7 @@ URL 入力
 Codex が実装時に迷った場合の優先順位:
 
 1. dummy comments で deterministic に通る MVP-0
-2. report.v1 schema の固定
+2. report.v2 schema の固定
 3. alias 誤爆を減らす候補確認 UI
 4. LLM による曖昧分類
 5. embedding / clustering
