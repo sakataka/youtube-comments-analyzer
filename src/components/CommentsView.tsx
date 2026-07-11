@@ -1,5 +1,10 @@
 import { formatNumber } from "../api";
 import { CommentsPage, Report } from "../types";
+import { Button } from "./ui/button";
+import { Field, FieldLabel } from "./ui/field";
+import { Input } from "./ui/input";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { SectionHeading } from "./SectionHeading";
 
 type Props = {
   report: Report;
@@ -17,16 +22,17 @@ export function CommentsView({ report, pageData, loading, search, personFilter, 
   const pageCount = Math.max(Math.ceil((pageData?.total ?? 0) / (pageData?.limit ?? 100)), 1);
   return (
     <section className="report-section report-section--full comments-section" aria-labelledby="comments-title">
-      <div className="section-heading">
-        <div><h2 id="comments-title">根拠コメント</h2><p>分析に使われたコメントを検索し、人物別に絞り込めます。</p></div>
-        <span>{formatNumber(pageData?.total ?? report.evidence.comment_count)}件</span>
-      </div>
+      <SectionHeading id="comments-title" title="根拠コメント" description="分析に使われたコメントを検索し、人物別に絞り込めます。" aside={<span>{formatNumber(pageData?.total ?? report.evidence.comment_count)}件</span>} />
       <div className="comment-filters">
-        <label>検索<input type="search" value={search} placeholder="コメント本文を検索" onChange={(event) => onSearchChange(event.target.value)} /></label>
-        <label>人物<select value={personFilter} onChange={(event) => onPersonFilterChange(event.target.value)}>
-          <option value="all">すべて</option><option value="unassigned">人物未紐づけ</option>
-          {report.rankings.mention_ranking.map((person) => <option value={person.person_id} key={person.person_id}>{person.display_name}</option>)}
-        </select></label>
+        <Field><FieldLabel htmlFor="comment-search">検索</FieldLabel><Input id="comment-search" type="search" value={search} placeholder="コメント本文を検索" onChange={(event) => onSearchChange(event.target.value)} /></Field>
+        <Field><FieldLabel htmlFor="person-filter">人物</FieldLabel><Select value={personFilter} onValueChange={onPersonFilterChange}>
+          <SelectTrigger id="person-filter"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value="all">すべて</SelectItem>
+            <SelectItem value="unassigned">人物未紐づけ</SelectItem>
+            {report.rankings.mention_ranking.map((person) => <SelectItem value={person.person_id} key={person.person_id}>{person.display_name}</SelectItem>)}
+          </SelectGroup></SelectContent>
+        </Select></Field>
       </div>
       {loading ? <p className="loading-note" aria-live="polite">コメントを読み込んでいます。</p> : null}
       <div className="comment-list">
@@ -38,9 +44,9 @@ export function CommentsView({ report, pageData, loading, search, personFilter, 
         ))}
       </div>
       <div className="pagination">
-        <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>前へ</button>
+        <Button variant="secondary" type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>前へ</Button>
         <span>{page + 1} / {pageCount}</span>
-        <button type="button" disabled={page + 1 >= pageCount} onClick={() => onPageChange(page + 1)}>次へ</button>
+        <Button variant="secondary" type="button" disabled={page + 1 >= pageCount} onClick={() => onPageChange(page + 1)}>次へ</Button>
       </div>
     </section>
   );

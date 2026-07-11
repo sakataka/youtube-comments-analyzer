@@ -4,6 +4,8 @@ import { ReportView } from "./components/ReportView";
 import { ReviewCenter } from "./components/ReviewCenter";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StartScreen } from "./components/StartScreen";
+import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
 import {
   AiInsight,
   AppView,
@@ -20,6 +22,7 @@ import {
 } from "./types";
 
 export default function App() {
+  useSystemTheme();
   const [url, setUrl] = useState("");
   const [maxComments, setMaxComments] = useState(5000);
   const [replyMode, setReplyMode] = useState<ReplyMode>("none");
@@ -49,6 +52,18 @@ export default function App() {
   useEffect(() => {
     void loadInitialData();
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    toast.error(error);
+    setError(null);
+  }, [error]);
+
+  useEffect(() => {
+    if (!notice) return;
+    toast.success(notice);
+    setNotice(null);
+  }, [notice]);
 
   useEffect(() => {
     if (!run || view !== "comments") return;
@@ -217,7 +232,7 @@ export default function App() {
       const nextReport = await api<Report>(`/api/runs/${run.run_id}/report`);
       setRun(nextRun);
       setReport(nextReport);
-      setReviewOpen(false);
+      closeDialog(setReviewOpen, "review");
       setNotice("レポートを確認済みにしました。");
       await refreshHistory();
     } catch (caught) {
@@ -248,7 +263,6 @@ export default function App() {
 
   async function dataAction(action: "archive_youtube_cache" | "delete_youtube_cache") {
     const verb = action === "delete_youtube_cache" ? "削除" : "退避";
-    if (!window.confirm(`YouTubeキャッシュを${verb}します。よろしいですか？`)) return;
     setBusy(true);
     try {
       await api("/api/data/actions", { method: "POST", body: JSON.stringify({ action }) });
@@ -320,25 +334,40 @@ export default function App() {
         />
       )}
 
-      {reviewOpen && report ? (
+      {report ? (
         <ReviewCenter
           report={report}
           candidates={candidates}
           busy={busy || aiBusy}
-          onClose={() => setReviewOpen(false)}
+          open={reviewOpen}
+          onClose={() => closeDialog(setReviewOpen, "review")}
           onCandidateAction={candidateAction}
           onSentimentAction={sentimentAction}
           onVerify={verifyReview}
           onRunAiAssist={() => run && void enhanceSentimentWithAi(run.run_id)}
         />
       ) : null}
-      {settingsOpen ? <SettingsPanel settings={settings} data={dataSummary} busy={busy} onClose={() => setSettingsOpen(false)} onDataAction={dataAction} /> : null}
-      {error ? <div className="toast toast--error" role="alert"><span>{error}</span><button type="button" aria-label="閉じる" onClick={() => setError(null)}>×</button></div> : null}
-      {notice ? <div className="toast" role="status"><span>{notice}</span><button type="button" aria-label="閉じる" onClick={() => setNotice(null)}>×</button></div> : null}
+      <SettingsPanel settings={settings} data={dataSummary} busy={busy} open={settingsOpen} onClose={() => closeDialog(setSettingsOpen, "settings")} onDataAction={dataAction} />
+      <Toaster closeButton richColors position="bottom-right" />
     </>
   );
 }
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
+}
+
+function useSystemTheme() {
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncTheme = () => document.documentElement.classList.toggle("dark", media.matches);
+    syncTheme();
+    media.addEventListener("change", syncTheme);
+    return () => media.removeEventListener("change", syncTheme);
+  }, []);
+}
+
+function closeDialog(setOpen: (open: boolean) => void, trigger: "settings" | "review") {
+  setOpen(false);
+  window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-dialog-trigger="${trigger}"]:not([hidden])`)?.focus());
 }

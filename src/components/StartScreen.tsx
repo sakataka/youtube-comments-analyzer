@@ -1,6 +1,13 @@
 import { FormEvent } from "react";
 import { formatNumber } from "../api";
 import { ReplyMode, RunJob, RunState, SettingsInfo } from "../types";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { Field, FieldContent, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "./ui/field";
+import { Input } from "./ui/input";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
+import { AppHeader } from "./AppHeader";
+import { SectionHeading } from "./SectionHeading";
 
 type Props = {
   url: string;
@@ -39,14 +46,7 @@ export function StartScreen({
 }: Props) {
   return (
     <main className="start-shell">
-      <header className="product-header">
-        <a className="product-name" href="/" aria-label="コメントインサイト ホーム">
-          コメントインサイト
-        </a>
-        <button className="text-button" type="button" onClick={onOpenSettings}>
-          設定
-        </button>
-      </header>
+      <AppHeader onOpenSettings={onOpenSettings} />
 
       <section className="start-hero" aria-labelledby="start-title">
         <div className="start-copy">
@@ -54,9 +54,9 @@ export function StartScreen({
           <p>誰が、どんな感情で、何について語られたのか。件数と根拠コメントを一つのレポートにまとめます。</p>
         </div>
         <form className="analysis-form" onSubmit={onSubmit}>
-          <label htmlFor="youtube-url">YouTube動画のURL</label>
+          <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">
-            <input
+            <Input
               id="youtube-url"
               type="url"
               inputMode="url"
@@ -66,16 +66,16 @@ export function StartScreen({
               onChange={(event) => setUrl(event.target.value)}
               required
             />
-            <button type="submit" disabled={busy}>
+            <Button size="lg" type="submit" disabled={busy}>
               {busy ? "分析しています" : "分析する"}
-            </button>
+            </Button>
           </div>
           <details className="advanced-settings">
             <summary>詳細設定</summary>
-            <div className="advanced-settings__body">
-              <label htmlFor="max-comments">
-                最大コメント数
-                <input
+            <FieldGroup className="advanced-settings__body">
+              <Field className="max-comments-field" orientation="responsive">
+                <FieldLabel htmlFor="max-comments">最大コメント数</FieldLabel>
+                <Input
                   id="max-comments"
                   type="number"
                   min={settings?.max_comments.min ?? 1}
@@ -83,28 +83,24 @@ export function StartScreen({
                   value={maxComments}
                   onChange={(event) => setMaxComments(Number(event.target.value))}
                 />
-              </label>
-              <fieldset>
-                <legend>返信コメント</legend>
+              </Field>
+              <FieldSet>
+                <FieldLegend>返信コメント</FieldLegend>
+                <RadioGroup value={replyMode} onValueChange={(value) => setReplyMode(value as ReplyMode)}>
                 {(settings?.reply_fetch_modes ?? defaultReplyModes).map((mode) => (
-                  <label className="radio-row" key={mode.value}>
-                    <input
-                      type="radio"
-                      name="reply-mode"
-                      value={mode.value}
-                      checked={replyMode === mode.value}
-                      onChange={() => setReplyMode(mode.value)}
-                    />
-                    <span>{mode.label}</span>
+                  <FieldLabel className="radio-row" htmlFor={`reply-mode-${mode.value}`} key={mode.value}>
+                    <RadioGroupItem id={`reply-mode-${mode.value}`} value={mode.value} />
+                    <FieldContent><span>{mode.label}</span></FieldContent>
                     {mode.uses_extra_quota ? <small>追加quotaを使用</small> : null}
-                  </label>
+                  </FieldLabel>
                 ))}
-              </fieldset>
-              <label className="check-row">
-                <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} />
-                <span>保存済みコメントとの差分を更新する</span>
-              </label>
-            </div>
+                </RadioGroup>
+              </FieldSet>
+              <Field orientation="horizontal">
+                <Checkbox id="force-refresh" checked={forceRefresh} onCheckedChange={(checked) => setForceRefresh(checked === true)} />
+                <FieldLabel className="check-row" htmlFor="force-refresh">保存済みコメントとの差分を更新する</FieldLabel>
+              </Field>
+            </FieldGroup>
           </details>
           {job && job.status !== "completed" ? (
             <div className="job-progress" aria-live="polite">
@@ -119,24 +115,18 @@ export function StartScreen({
       </section>
 
       <section className="recent-runs" aria-labelledby="recent-title">
-        <div className="section-title-row">
-          <div>
-            <h2 id="recent-title">最近の分析</h2>
-            <p>保存済みのレポートを、そのまま続きから開けます。</p>
-          </div>
-          <span>{history.length}件</span>
-        </div>
+        <SectionHeading compact id="recent-title" title="最近の分析" description="保存済みのレポートを、そのまま続きから開けます。" aside={<span>{history.length}件</span>} />
         {history.length ? (
           <div className="recent-list">
             {history.slice(0, 6).map((item) => (
-              <button className="recent-row" type="button" key={item.run_id} onClick={() => onOpenRun(item.run_id)}>
+              <Button className="recent-row" variant="ghost" type="button" key={item.run_id} onClick={() => onOpenRun(item.run_id)}>
                 <span className="recent-row__title">{item.video?.title || item.video?.youtube_video_id || item.run_id}</span>
                 <span>{item.video?.channel_title || "チャンネル未取得"}</span>
                 <span>
                   {formatNumber(item.fetch_summary?.max_comments_fetched)}件・
                   {item.review_status === "verified" ? "確認済み" : "暫定"}
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
         ) : (
