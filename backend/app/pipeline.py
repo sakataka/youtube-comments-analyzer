@@ -1474,6 +1474,7 @@ class AnalysisStore:
     def run_ai_insight(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
         self.get_latest_report(run_id)
         report = self.build_report(run_id)
+        self.persist_report(run_id, report)
         prompt = build_ai_insight_prompt(report)
         cache_key = ai_insight_cache_key(prompt)
         cached = self.read_llm_cache(cache_key)
