@@ -77,3 +77,31 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
   expect(theme.background).not.toBe("");
   expect(theme.dark).toBe(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches));
 });
+
+test("三段階再判定と人の修正がコメント詳細へ反映される", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "状態更新の統合確認はdesktopで代表実行する");
+  await page.goto("/");
+  await page.getByLabel("YouTube動画のURL").fill("https://www.youtube.com/watch?v=vlpLbiqNhLo");
+  await page.getByRole("button", { name: "分析する" }).click();
+  await expect(page.getByText("暫定レポート", { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("button", { name: "レビューを開く" }).click();
+  const review = page.getByRole("dialog", { name: "レビューセンター" });
+  await review.getByRole("button", { name: "感情を再判定" }).click();
+  await expect(review.getByText("利用済み", { exact: true }).last()).toBeVisible({ timeout: 30_000 });
+
+  const reviewItem = review.locator(".review-item").filter({ hasText: "動画全体" }).first();
+  const sentimentChoice = reviewItem.getByLabel("感情を修正");
+  const commentText = (await reviewItem.locator("p").first().textContent())?.trim() ?? "";
+  expect(commentText.length).toBeGreaterThan(3);
+  await sentimentChoice.getByRole("button", { name: "ポジティブ" }).click();
+  await review.getByRole("button", { name: "閉じる" }).click();
+
+  await page.getByRole("tab", { name: "コメント", exact: true }).click();
+  await page.getByRole("searchbox", { name: "検索" }).fill(commentText.slice(0, 12));
+  const matched = page.locator(".comment-row").filter({ hasText: commentText.slice(0, 12) }).first();
+  await expect(matched.locator(".human-badge")).toHaveText("人が修正");
+  await matched.getByText("判定詳細", { exact: true }).click();
+  await expect(matched.getByText("人が修正", { exact: true })).toHaveCount(2);
+  await expect(matched.locator(".sentiment-details")).toContainText("fake/sentiment");
+});

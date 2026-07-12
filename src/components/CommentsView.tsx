@@ -1,5 +1,6 @@
 import { formatNumber } from "../api";
 import { CommentsPage, Report, SentimentLabel } from "../types";
+import { integrationReasonLabel, sentimentLabel, sentimentLabels, sentimentMethodLabel } from "../lib/sentiment";
 import { Button } from "./ui/button";
 import { Field, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
@@ -57,7 +58,16 @@ export function CommentsView({ report, pageData, loading, search, personFilter, 
         {pageData?.comments.map((comment) => (
           <article className="comment-row" key={comment.comment_id}>
             <p>{comment.text_original}</p>
-            <div><strong className="comment-like">高評価 {formatNumber(comment.like_count)}</strong><span className={`sentiment-tag sentiment-tag--${comment.sentiment_label}`}>{sentimentLabel(comment.sentiment_label)}</span>{comment.is_reply ? <span>返信</span> : null}{comment.mentioned_persons.map((person) => <span key={person.person_id}>{person.display_name}</span>)}</div>
+            <div><strong className="comment-like">高評価 {formatNumber(comment.like_count)}</strong><span className={`sentiment-tag sentiment-tag--${comment.sentiment_label}`}>{sentimentLabel(comment.sentiment_label)}</span>{comment.sentiment_is_human_override ? <span className="human-badge">人が修正</span> : null}{comment.is_reply ? <span>返信</span> : null}{comment.mentioned_persons.map((person) => <span key={person.person_id}>{person.display_name}</span>)}</div>
+            <details className="sentiment-details">
+              <summary>判定詳細</summary>
+              <dl>
+                <div><dt>方法</dt><dd>{sentimentMethodLabel(comment.sentiment_method)}</dd></div>
+                <div><dt>確度</dt><dd>{comment.sentiment_method === "human" ? "人が確定" : `${Math.round(comment.sentiment_confidence * 100)}%`}</dd></div>
+                <div><dt>理由</dt><dd>{integrationReasonLabel(comment.sentiment_reason)}</dd></div>
+                {comment.sentiment_model_id ? <div><dt>モデル</dt><dd>{comment.sentiment_model_id}<br /><code>{comment.sentiment_model_revision}</code></dd></div> : null}
+              </dl>
+            </details>
           </article>
         ))}
       </div>
@@ -68,10 +78,4 @@ export function CommentsView({ report, pageData, loading, search, personFilter, 
       </div>
     </section>
   );
-}
-
-const sentimentLabels: SentimentLabel[] = ["positive", "neutral", "negative", "mixed", "unclear"];
-
-function sentimentLabel(label: SentimentLabel): string {
-  return { positive: "ポジティブ", neutral: "ニュートラル", negative: "ネガティブ", mixed: "混合", unclear: "判断保留" }[label];
 }

@@ -40,7 +40,7 @@ def new_id(prefix: str) -> str:
 
 def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": "llm_assist.v2",
+        "schema_version": "llm_assist.v3",
         "prompt_version": PROMPT_VERSION,
         "provider": "codex_app_server",
         "source": "codex_app_server",
@@ -292,7 +292,7 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition:
 def serialize_store_methods(cls: type) -> type:
     """Serialize access to the single SQLite connection across API and job threads."""
     for name, method in list(vars(cls).items()):
-        if name.startswith("__") or not callable(method):
+        if name.startswith("__") or name in {"run_llm_assist", "run_ai_insight"} or not callable(method):
             continue
 
         @wraps(method)
@@ -931,10 +931,27 @@ class AnalysisStore:
         result: dict[str, Any],
         created_at: str,
     ) -> None:
-        evidence = {
-            "terms": result.get("evidence") or [],
-            "scope_text": result.get("scope_text") or "",
-        }
+        evidence = result.get("evidence")
+        if not isinstance(evidence, dict):
+            evidence = {
+                "schema_version": "sentiment_evidence.v2",
+                "rule": {
+                    "label": result["label"],
+                    "confidence": result["confidence"],
+                    "matched_terms": result.get("matched_terms") or [],
+                    "negations": result.get("negations") or [],
+                    "scope_text": result.get("scope_text") or "",
+                    "scope_type": result.get("scope_type") or "full",
+                    "ambiguity_flags": result.get("ambiguity_flags") or [],
+                },
+                "local_model": {"status": "not_run"},
+                "integration": {
+                    "label": result["label"],
+                    "reason": "rule_provisional",
+                    "needs_ai": bool(result.get("needs_ai")),
+                    "review_reasons": ["ambiguous_expression"] if result.get("needs_ai") else [],
+                },
+            }
         self.conn.execute(
             """
             insert into sentiment_labels (
@@ -966,22 +983,167 @@ class AnalysisStore:
             (run_id,),
         ).fetchall()
         for row in rows:
-            self.conn.execute(
+            current = self.conn.execute(
                 """
-                update sentiment_labels
-                set label = ?, confidence = 1, method = 'human', needs_ai = 0
+                select id, evidence_json from sentiment_labels
                 where analysis_run_id = ? and comment_id = ? and target_type = ?
                   and ((target_id = ?) or (target_id is null and ? is null))
                 """,
+                (run_id, row["comment_id"], row["target_type"], row["target_id"], row["target_id"]),
+            ).fetchone()
+            if not current:
+                continue
+            evidence = json.loads(current["evidence_json"])
+            evidence["human_override"] = {"label": row["label"], "created_at": row["created_at"]}
+            self.conn.execute(
+                """
+                update sentiment_labels
+                set label = ?, confidence = 1, method = 'human', needs_ai = 0, evidence_json = ?
+                where id = ?
+                """,
                 (
                     row["label"],
-                    run_id,
-                    row["comment_id"],
-                    row["target_type"],
-                    row["target_id"],
-                    row["target_id"],
+                    json.dumps(evidence, ensure_ascii=False),
+                    current["id"],
                 ),
             )
+
+    def prepare_sentiment_targets(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run_row(run_id)
+        comments = [dict(row) for row in self.comments_for_snapshot(run["comment_snapshot_id"])]
+        mentions = self.conn.execute(
+            """
+            select m.comment_id, m.person_id, p.display_name
+            from comment_mentions m
+            join persons p on p.id = m.person_id
+            where m.analysis_run_id = ?
+            """,
+            (run_id,),
+        ).fetchall()
+        aliases = self.conn.execute(
+            """
+            select person_id, alias_text from aliases
+            where analysis_run_id = ? and status = 'accepted'
+            order by hit_count desc
+            """,
+            (run_id,),
+        ).fetchall()
+        aliases_by_person: dict[str, list[str]] = {}
+        for alias in aliases:
+            aliases_by_person.setdefault(alias["person_id"], []).append(alias["alias_text"])
+        mentions_by_comment: dict[str, list[dict[str, Any]]] = {}
+        for mention in mentions:
+            mentions_by_comment.setdefault(mention["comment_id"], []).append({
+                "person_id": mention["person_id"],
+                "display_name": mention["display_name"],
+                "aliases": aliases_by_person.get(mention["person_id"], [mention["display_name"]]),
+            })
+        video = self.conn.execute("select title from videos where id = ?", (run["video_id"],)).fetchone()
+        return {
+            "run_id": run_id,
+            "video_title": video["title"],
+            "comments": comments,
+            "mentions_by_comment": mentions_by_comment,
+        }
+
+    def replace_sentiment_results(
+        self,
+        run_id: str,
+        results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        self.get_run_row(run_id)
+        now = utc_now()
+        try:
+            self.conn.execute("begin immediate")
+            self.conn.execute("delete from sentiment_labels where analysis_run_id = ?", (run_id,))
+            for result in results:
+                self.insert_sentiment_label(
+                    run_id,
+                    result["comment_id"],
+                    result["target_type"],
+                    result.get("target_id"),
+                    result,
+                    now,
+                )
+            self.apply_sentiment_overrides(run_id)
+            report = self.build_report(run_id)
+            self.conn.execute(
+                "insert into reports values (?, ?, ?, ?)",
+                (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), now),
+            )
+            self.save_report_sections(run_id, report)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        self._write_run_artifact(run_id, "report.json", report)
+        self._write_run_artifact(run_id, "sentiment_labels.jsonl", results, jsonl=True)
+        return report
+
+    def apply_ai_sentiment_results(
+        self,
+        run_id: str,
+        generation_id: str,
+        recommendations: list[dict[str, Any]],
+        attempted_targets: list[tuple[str, str, str | None]],
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        allowed = {
+            (str(item.get("comment_id")), str(item.get("target_type") or "video"), item.get("target_id")): item
+            for item in recommendations
+            if item.get("label") in SENTIMENT_LABELS and item.get("confidence") in {"high", "medium", "low"}
+        }
+        attempted = set(attempted_targets)
+        rows = self.conn.execute(
+            "select * from sentiment_labels where analysis_run_id = ? and needs_ai = 1",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            evidence = json.loads(row["evidence_json"])
+            if evidence.get("integration", {}).get("generation_id") != generation_id:
+                continue
+            key = (row["comment_id"], row["target_type"], row["target_id"])
+            if key not in attempted:
+                continue
+            item = allowed.get(key)
+            if item and item["confidence"] in {"high", "medium"}:
+                score = 0.9 if item["confidence"] == "high" else 0.78
+                evidence["ai"] = {
+                    "status": "applied",
+                    "confidence": item["confidence"],
+                    "reason": str(item.get("reason") or "")[:500],
+                }
+                self.conn.execute(
+                    "update sentiment_labels set label = ?, confidence = ?, method = 'ai', evidence_json = ?, needs_ai = 0 where id = ?",
+                    (item["label"], score, json.dumps(evidence, ensure_ascii=False), row["id"]),
+                )
+            else:
+                reason = failure_reason or (str(item.get("reason") or "AI confidence was low") if item else "AI did not return a valid result")
+                evidence["ai"] = {"status": "failed" if failure_reason else "unresolved", "reason": reason[:500]}
+                review_reasons = evidence.setdefault("integration", {}).setdefault("review_reasons", [])
+                marker = "ai_failed" if failure_reason else "ai_unresolved"
+                if marker not in review_reasons:
+                    review_reasons.insert(0, marker)
+                self.conn.execute(
+                    "update sentiment_labels set evidence_json = ? where id = ?",
+                    (json.dumps(evidence, ensure_ascii=False), row["id"]),
+                )
+        self.apply_sentiment_overrides(run_id)
+        self.conn.commit()
+        report = self.build_report(run_id)
+        self.persist_report(run_id, report)
+        return report
+
+    def find_active_sentiment_job(self, run_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            """
+            select id from analysis_jobs
+            where run_id = ? and status in ('queued', 'running') and stage like 'sentiment_%'
+            order by created_at desc limit 1
+            """,
+            (run_id,),
+        ).fetchone()
+        return self.get_job(row["id"]) if row else None
 
     def apply_sentiment_actions(self, run_id: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
         self.get_run_row(run_id)
@@ -1023,6 +1185,7 @@ class AnalysisStore:
             """,
             (run_id,),
         ).fetchall()
+        evidence_by_id = {row["id"]: json.loads(row["evidence_json"]) for row in rows}
         overall_rows = [row for row in rows if row["target_type"] == "video"]
         people: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -1048,11 +1211,74 @@ class AnalysisStore:
                 ),
             })
         per_person.sort(key=lambda item: item["distribution"]["total"], reverse=True)
-        review_rows = [row for row in rows if row["needs_ai"] or row["confidence"] < 0.7][:60]
+        priority = {
+            "ai_failed": 0,
+            "rule_model_conflict": 1,
+            "local_model_failed": 2,
+            "low_model_confidence": 3,
+            "mixed_candidate": 4,
+            "input_truncated": 5,
+            "ambiguous_expression": 6,
+            "ai_unresolved": 7,
+        }
+
+        def review_key(row: sqlite3.Row) -> tuple[int, int]:
+            reasons = evidence_by_id[row["id"]].get("integration", {}).get("review_reasons", [])
+            rank = min((priority.get(reason, 99) for reason in reasons), default=99)
+            return (rank, -int(row["like_count"]))
+
+        all_review_rows = sorted(
+            [row for row in rows if row["method"] != "human" and (row["needs_ai"] or row["confidence"] < 0.7)],
+            key=review_key,
+        )
+        review_rows = all_review_rows[:120]
+        local_evidence = [evidence_by_id[row["id"]].get("local_model", {}) for row in overall_rows]
+        available_local = next((item for item in local_evidence if item.get("status") == "available"), None)
+        failed_local = next((item for item in local_evidence if item.get("status") == "failed"), None)
+        local_status = "available" if available_local else "failed" if failed_local else "not_run"
+        local_source = available_local or failed_local or {}
+        method_counts = {method: 0 for method in ("rule", "local_model", "hybrid", "ai", "human")}
+        for row in overall_rows:
+            method_counts[row["method"]] = method_counts.get(row["method"], 0) + 1
+        ai_evidence = [
+            evidence_by_id[row["id"]].get("ai")
+            for row in rows
+            if evidence_by_id[row["id"]].get("ai")
+        ]
+        ai_comments = {
+            row["comment_id"]
+            for row in rows
+            if evidence_by_id[row["id"]].get("ai")
+        }
+        ai_applied = sum(item.get("status") == "applied" for item in ai_evidence)
+        ai_failed = sum(item.get("status") != "applied" for item in ai_evidence)
+        ai_status = "available" if ai_applied and not ai_failed else "partial" if ai_applied else "failed" if ai_failed else "not_run"
+        generation_id = next(
+            (evidence_by_id[row["id"]].get("integration", {}).get("generation_id") for row in overall_rows if evidence_by_id[row["id"]].get("integration", {}).get("generation_id")),
+            None,
+        )
         return {
             "method": "hybrid",
+            "pipeline_version": "sentiment.v2",
+            "generation_id": generation_id,
             "rule_status": "available",
-            "ai_status": self.sentiment_ai_status(run_id),
+            "local_model": {
+                "status": local_status,
+                "model_id": local_source.get("model_id"),
+                "revision": local_source.get("revision"),
+                "confidence_threshold": local_source.get("confidence_threshold"),
+                "device": local_source.get("device"),
+                "failure_reason": local_source.get("error"),
+            },
+            "ai_status": ai_status,
+            "ai_summary": {
+                "assisted_comment_count": len(ai_comments),
+                "applied_label_count": ai_applied,
+                "failed_label_count": ai_failed,
+                "eligible_label_count": sum(bool(evidence_by_id[row["id"]].get("integration", {}).get("needs_ai")) for row in rows),
+            },
+            "method_counts": method_counts,
+            "review_item_count": len(all_review_rows),
             "overall": sentiment_distribution(row["label"] for row in overall_rows),
             "per_person": per_person,
             "review_items": [
@@ -1066,23 +1292,21 @@ class AnalysisStore:
                     "label": row["label"],
                     "confidence": row["confidence"],
                     "method": row["method"],
-                    "evidence": json.loads(row["evidence_json"]),
+                    "evidence": evidence_by_id[row["id"]],
+                    "review_reasons": evidence_by_id[row["id"]].get("integration", {}).get("review_reasons", []),
                 }
                 for row in review_rows
             ],
         }
 
     def sentiment_ai_status(self, run_id: str) -> str:
-        row = self.conn.execute(
-            """
-            select status from llm_assists
-            where analysis_run_id = ? order by created_at desc limit 1
-            """,
+        rows = self.conn.execute(
+            "select method, evidence_json from sentiment_labels where analysis_run_id = ?",
             (run_id,),
-        ).fetchone()
-        if not row:
-            return "not_run"
-        return "failed" if row["status"] == "failed" else "available"
+        ).fetchall()
+        applied = any(row["method"] == "ai" for row in rows)
+        failed = any(json.loads(row["evidence_json"]).get("ai", {}).get("status") in {"failed", "unresolved"} for row in rows)
+        return "partial" if applied and failed else "available" if applied else "failed" if failed else "not_run"
 
     def build_report(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
@@ -1160,32 +1384,38 @@ class AnalysisStore:
             if label not in SENTIMENT_LABELS or confidence not in {"high", "medium"}:
                 continue
             target_name = item.get("target_display_name")
-            target_type = "person" if target_name else "video"
-            target_id = people.get(target_name) if target_name else None
-            if target_name and not target_id:
+            target_type = item.get("target_type") or ("person" if target_name else "video")
+            target_id = item.get("target_id") or (people.get(target_name) if target_name else None)
+            if target_type == "person" and not target_id:
                 continue
             score = 0.9 if confidence == "high" else 0.78
-            evidence = json.dumps(
-                {"terms": [], "scope_text": "", "ai_reason": item.get("reason") or ""},
-                ensure_ascii=False,
-            )
+            current = self.conn.execute(
+                """
+                select id, evidence_json from sentiment_labels
+                where analysis_run_id = ? and comment_id = ? and target_type = ?
+                  and ((target_id = ?) or (target_id is null and ? is null)) and needs_ai = 1
+                """,
+                (run_id, item.get("comment_id"), target_type, target_id, target_id),
+            ).fetchone()
+            if not current:
+                continue
+            evidence = json.loads(current["evidence_json"])
+            evidence["ai"] = {
+                "status": "applied",
+                "confidence": confidence,
+                "reason": str(item.get("reason") or "")[:500],
+            }
             self.conn.execute(
                 """
                 update sentiment_labels
                 set label = ?, confidence = ?, method = 'ai', evidence_json = ?, needs_ai = 0
-                where analysis_run_id = ? and comment_id = ? and target_type = ?
-                  and ((target_id = ?) or (target_id is null and ? is null))
-                  and needs_ai = 1
+                where id = ?
                 """,
                 (
                     label,
                     score,
-                    evidence,
-                    run_id,
-                    item.get("comment_id"),
-                    target_type,
-                    target_id,
-                    target_id,
+                    json.dumps(evidence, ensure_ascii=False),
+                    current["id"],
                 ),
             )
         self.apply_sentiment_overrides(run_id)
@@ -1507,7 +1737,7 @@ class AnalysisStore:
         ).fetchall()
         comment_ids = [row["id"] for row in rows]
         mentions_by_comment: dict[str, list[dict[str, Any]]] = {comment_id: [] for comment_id in comment_ids}
-        sentiments_by_comment: dict[str, str] = {}
+        sentiments_by_comment: dict[str, dict[str, Any]] = {}
         if comment_ids:
             placeholders = ",".join("?" for _ in comment_ids)
             mention_rows = self.conn.execute(
@@ -1529,14 +1759,25 @@ class AnalysisStore:
                 })
             sentiment_rows = self.conn.execute(
                 f"""
-                select comment_id, label
+                select comment_id, label, confidence, method, evidence_json
                 from sentiment_labels
                 where analysis_run_id = ? and target_type = 'video' and target_id is null
                   and comment_id in ({placeholders})
                 """,
                 [run_id, *comment_ids],
             ).fetchall()
-            sentiments_by_comment = {row["comment_id"]: row["label"] for row in sentiment_rows}
+            for row in sentiment_rows:
+                evidence = json.loads(row["evidence_json"])
+                local = evidence.get("local_model") or {}
+                sentiments_by_comment[row["comment_id"]] = {
+                    "label": row["label"],
+                    "confidence": row["confidence"],
+                    "method": row["method"],
+                    "model_id": local.get("model_id"),
+                    "model_revision": local.get("revision"),
+                    "reason": evidence.get("integration", {}).get("reason"),
+                    "is_human_override": row["method"] == "human",
+                }
         return {
             "run_id": run_id,
             "total": total,
@@ -1549,7 +1790,13 @@ class AnalysisStore:
                     "like_count": comment["like_count"],
                     "is_reply": bool(comment["is_reply"]),
                     "parent_comment_id": comment["parent_comment_id"],
-                    "sentiment_label": sentiments_by_comment.get(comment["id"], "unclear"),
+                    "sentiment_label": sentiments_by_comment.get(comment["id"], {}).get("label", "unclear"),
+                    "sentiment_method": sentiments_by_comment.get(comment["id"], {}).get("method", "rule"),
+                    "sentiment_confidence": sentiments_by_comment.get(comment["id"], {}).get("confidence", 0.0),
+                    "sentiment_model_id": sentiments_by_comment.get(comment["id"], {}).get("model_id"),
+                    "sentiment_model_revision": sentiments_by_comment.get(comment["id"], {}).get("model_revision"),
+                    "sentiment_reason": sentiments_by_comment.get(comment["id"], {}).get("reason"),
+                    "sentiment_is_human_override": sentiments_by_comment.get(comment["id"], {}).get("is_human_override", False),
                     "mentioned_persons": mentions_by_comment.get(comment["id"], []),
                 }
                 for comment in rows
@@ -1586,6 +1833,7 @@ class AnalysisStore:
             "appeal_labels.json",
             "llm_assist.json",
             "ai_insight.json",
+            "sentiment_labels.jsonl",
         ]:
             path = artifact_dir / name
             if path.exists():
@@ -1694,6 +1942,8 @@ class AnalysisStore:
             "comment_mentions",
             "candidate_action_logs",
             "comment_mention_overrides",
+            "sentiment_labels",
+            "sentiment_overrides",
             "llm_assists",
             "ai_insights",
             "appeal_labels",
@@ -1702,6 +1952,7 @@ class AnalysisStore:
             "persons",
         ]:
             self.conn.execute(f"delete from {table} where analysis_run_id = ?", (run_id,))
+        self.conn.execute("delete from analysis_jobs where run_id = ?", (run_id,))
         self.conn.execute("delete from analysis_runs where id = ?", (run_id,))
         self.conn.execute("delete from comments where comment_snapshot_id = ?", (snapshot_id,))
         self.conn.execute("delete from comment_snapshots where id = ?", (snapshot_id,))
@@ -1711,6 +1962,38 @@ class AnalysisStore:
             if path.exists():
                 shutil.rmtree(path)
         return {"status": "deleted", "run_id": run_id}
+
+    def export_sentiment_overrides_jsonl(self, run_id: str) -> str:
+        self.get_run_row(run_id)
+        rows = self.conn.execute(
+            """
+            select o.*, c.text_original, p.display_name as target_display_name
+            from sentiment_overrides o
+            join comments c on c.id = o.comment_id
+            left join persons p on p.id = o.target_id
+            where o.analysis_run_id = ?
+            order by o.created_at asc
+            """,
+            (run_id,),
+        ).fetchall()
+        latest: dict[tuple[str, str, str | None], sqlite3.Row] = {}
+        for row in rows:
+            latest[(row["comment_id"], row["target_type"], row["target_id"])] = row
+        return "".join(
+            json.dumps({
+                "schema_version": "sentiment_override.v1",
+                "run_id": run_id,
+                "comment_id": row["comment_id"],
+                "text": row["text_original"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "target_display_name": row["target_display_name"],
+                "label": row["label"],
+                "created_at": row["created_at"],
+                "source": "human_override",
+            }, ensure_ascii=False) + "\n"
+            for row in latest.values()
+        )
 
     def archive_youtube_cache(self) -> dict[str, Any]:
         source = self.data_dir / "youtube_cache"

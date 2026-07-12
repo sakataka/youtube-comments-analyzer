@@ -1,5 +1,6 @@
 import { formatNumber } from "../api";
 import { CandidatesResponse, Report, SentimentLabel, SentimentReviewItem } from "../types";
+import { sentimentLabel, sentimentMethodLabel, sentimentReasonLabel } from "../lib/sentiment";
 import { XIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -38,8 +39,9 @@ export function ReviewCenter({ report, candidates, busy, open, onClose, onCandid
         <div className="review-summary">
           <div><span>人物候補</span><strong>{pendingCandidates.length}件</strong></div>
           <div><span>要確認（上位を表示）</span><strong>{report.review.pending_item_count}件</strong></div>
-          <div><span>AI補助</span><strong>{report.sentiment.ai_status === "available" ? "利用済み" : "未完了"}</strong></div>
-          <Button type="button" disabled={busy} onClick={onRunAiAssist}>AIで曖昧項目を補助</Button>
+          <div><span>AI補助</span><strong>{report.sentiment.ai_status === "available" ? "利用済み" : report.sentiment.ai_status === "partial" ? "一部未完了" : "未完了"}</strong></div>
+          <div><span>ローカルモデル</span><strong>{report.sentiment.local_model?.status === "available" ? "利用済み" : "未完了"}</strong></div>
+          <Button type="button" disabled={busy} onClick={onRunAiAssist}>感情を再判定</Button>
         </div>
 
         <div className="review-columns">
@@ -72,8 +74,10 @@ export function ReviewCenter({ report, candidates, busy, open, onClose, onCandid
             ) : null}
             {sentimentItems.length ? sentimentItems.map((item) => (
               <article className="review-item" key={`${item.comment_id}-${item.target_type}-${item.target_id ?? "video"}`}>
-                <div><strong>{item.target_display_name || "動画全体"}</strong><span>現在: {labelText(item.label)}・確度 {Math.round(item.confidence * 100)}%</span></div>
+                <div><strong>{item.target_display_name || "動画全体"}</strong><span>現在: {sentimentLabel(item.label)}・{item.method === "human" ? "人が確定" : `確度 ${Math.round(item.confidence * 100)}%`}・{sentimentMethodLabel(item.method)}</span></div>
+                {item.review_reasons?.length ? <div className="review-reasons">{item.review_reasons.map((reason) => <span key={reason}>{sentimentReasonLabel(reason)}</span>)}</div> : null}
                 <p>{item.text_original}</p>
+                <SentimentEvidenceDetails item={item} />
                 <div className="sentiment-choices" aria-label="感情を修正">
                   {sentimentOptions.map((option) => (
                     <Button size="sm" variant={item.label === option.value ? "default" : "secondary"} type="button" disabled={busy} onClick={() => onSentimentAction(item, option.value)} key={option.value}>{option.label}</Button>
@@ -92,6 +96,19 @@ export function ReviewCenter({ report, candidates, busy, open, onClose, onCandid
   );
 }
 
-function labelText(label: SentimentLabel): string {
-  return sentimentOptions.find((item) => item.value === label)?.label ?? label;
+function SentimentEvidenceDetails({ item }: { item: SentimentReviewItem }) {
+  const rule = item.evidence.rule;
+  const local = item.evidence.local_model;
+  const probabilities = local?.probabilities;
+  return (
+    <details className="review-evidence">
+      <summary>判定根拠</summary>
+      <dl>
+        <div><dt>ルール</dt><dd>{rule?.matched_terms?.map((term) => term.term).join("・") || "一致語なし"}</dd></div>
+        {rule?.ambiguity_flags?.length ? <div><dt>曖昧性</dt><dd>{rule.ambiguity_flags.join("・")}</dd></div> : null}
+        {probabilities ? <div><dt>モデル確率</dt><dd>ポジティブ {Math.round((probabilities.positive ?? 0) * 100)}% / ニュートラル {Math.round((probabilities.neutral ?? 0) * 100)}% / ネガティブ {Math.round((probabilities.negative ?? 0) * 100)}%</dd></div> : null}
+        {item.evidence.ai?.reason ? <div><dt>AI</dt><dd>{item.evidence.ai.reason}</dd></div> : null}
+      </dl>
+    </details>
+  );
 }

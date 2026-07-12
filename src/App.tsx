@@ -32,6 +32,7 @@ export default function App() {
   const [history, setHistory] = useState<RunState[]>([]);
   const [run, setRun] = useState<RunState | null>(null);
   const [job, setJob] = useState<RunJob | null>(null);
+  const [sentimentJob, setSentimentJob] = useState<RunJob | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [candidates, setCandidates] = useState<CandidatesResponse | null>(null);
   const [view, setView] = useState<AppView>("overview");
@@ -108,7 +109,7 @@ export default function App() {
       const completed = await waitForJob(created.job_id);
       if (!completed.run_id) throw new Error("分析結果のIDを取得できませんでした。");
       await openRun(completed.run_id);
-      if (import.meta.env.VITE_AUTO_AI_ASSIST !== "0") void enhanceSentimentWithAi(completed.run_id);
+      if (import.meta.env.VITE_AUTO_AI_ASSIST !== "0") void reanalyzeSentiment(completed.run_id);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -149,6 +150,7 @@ export default function App() {
       setCommentPage(0);
       setView("overview");
       setJob(null);
+      setSentimentJob(null);
       setReviewOpen(false);
       setUrl(nextRun.video?.url ?? "");
       setMaxComments(nextRun.fetch_summary?.max_comments_requested ?? maxComments);
@@ -162,17 +164,33 @@ export default function App() {
     }
   }
 
-  async function enhanceSentimentWithAi(runId: string) {
-    setAiBusy(true);
+  async function reanalyzeSentiment(runId: string) {
     try {
-      await api(`/api/runs/${runId}/llm-assist`, { method: "POST" });
+      const created = await api<RunJob>(`/api/runs/${runId}/sentiment/reanalyze`, {
+        method: "POST",
+        body: JSON.stringify({ include_ai: true })
+      });
+      const completed = await waitForSentimentJob(created);
+      if (completed.status !== "completed") return;
       const nextReport = await api<Report>(`/api/runs/${runId}/report`);
       setReport((current) => (current?.run_id === runId ? nextReport : current));
-      setNotice(nextReport.sentiment.ai_status === "failed" ? "AI補助を利用できなかったため、ルール結果を表示しています。" : "AI補助で曖昧な感情判定を更新しました。");
+      if (run?.run_id === runId && view === "comments") {
+        await loadComments(runId, commentPage, commentSearch, commentPersonFilter, commentSentimentFilter, commentSort);
+      }
+      setNotice(nextReport.sentiment.local_model?.status === "failed" ? "ローカルモデルを利用できなかったため、ルール結果へ縮退しました。" : nextReport.sentiment.ai_status === "failed" ? "AI補助に失敗した項目は判断保留としてレビューへ残しました。" : "三段階の感情判定を反映しました。");
     } catch (caught) {
-      setNotice(`AI補助を利用できませんでした。ルール結果は有効です。${errorMessage(caught)}`);
-    } finally {
-      setAiBusy(false);
+      setNotice(`感情の再判定を完了できませんでした。現在の結果は保持されています。${errorMessage(caught)}`);
+    }
+  }
+
+  async function waitForSentimentJob(initial: RunJob): Promise<RunJob> {
+    let nextJob = initial;
+    while (true) {
+      setSentimentJob(nextJob);
+      if (nextJob.status === "completed") return nextJob;
+      if (nextJob.status === "failed") throw new Error(nextJob.error_message || "感情の再判定に失敗しました。");
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+      nextJob = await api<RunJob>(`/api/jobs/${nextJob.job_id}`);
     }
   }
 
@@ -204,6 +222,7 @@ export default function App() {
       setCandidates(nextCandidates);
       setReport(nextReport);
       setNotice("人物候補を反映してレポートを再集計しました。");
+      void reanalyzeSentiment(run.run_id);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -220,6 +239,7 @@ export default function App() {
         body: JSON.stringify({ actions: [{ comment_id: item.comment_id, target_type: item.target_type, target_id: item.target_id, label }] })
       });
       setReport(nextReport);
+      if (view === "comments") await loadComments(run.run_id, commentPage, commentSearch, commentPersonFilter, commentSentimentFilter, commentSort);
       setNotice("感情判定を修正しました。");
     } catch (caught) {
       setError(errorMessage(caught));
@@ -287,6 +307,7 @@ export default function App() {
     setCandidates(null);
     setCommentsPage(null);
     setAiInsight(null);
+    setSentimentJob(null);
     setCommentSearch("");
     setCommentPersonFilter("all");
     setCommentSentimentFilter("all");
@@ -313,6 +334,7 @@ export default function App() {
           setSelectedPersonId={setSelectedPersonId}
           aiInsight={aiInsight}
           aiBusy={aiBusy}
+          sentimentJob={sentimentJob}
           commentsPage={commentsPage}
           commentsLoading={commentsLoading}
           commentSearch={commentSearch}
@@ -354,13 +376,13 @@ export default function App() {
         <ReviewCenter
           report={report}
           candidates={candidates}
-          busy={busy || aiBusy}
+          busy={busy || aiBusy || sentimentJob?.status === "queued" || sentimentJob?.status === "running"}
           open={reviewOpen}
           onClose={() => closeDialog(setReviewOpen, "review")}
           onCandidateAction={candidateAction}
           onSentimentAction={sentimentAction}
           onVerify={verifyReview}
-          onRunAiAssist={() => run && void enhanceSentimentWithAi(run.run_id)}
+          onRunAiAssist={() => run && void reanalyzeSentiment(run.run_id)}
         />
       ) : null}
       <SettingsPanel settings={settings} data={dataSummary} busy={busy} open={settingsOpen} onClose={() => closeDialog(setSettingsOpen, "settings")} onDataAction={dataAction} />

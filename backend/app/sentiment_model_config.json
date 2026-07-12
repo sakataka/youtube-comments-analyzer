@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "model_id": "LoneWolfgang/bert-for-japanese-twitter-sentiment",
+  "revision": "81e5f6f9ef184b27acc908917eb6c182b28109cf",
+  "license": "Apache-2.0",
+  "label_by_index": ["negative", "neutral", "positive"],
+  "confidence_threshold": 0.5,
+  "max_length": 512,
+  "device": "auto",
+  "batch_sizes": {
+    "mps": {"128": 32, "256": 16, "512": 8},
+    "cpu": {"128": 16, "256": 8, "512": 4}
+  },
+  "ai_max_comments": 60,
+  "ai_batch_comments": 30,
+  "memory_cache_size": 20000
+}

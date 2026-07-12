@@ -8,10 +8,13 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .pipeline import AnalysisStore
+from .local_sentiment import FakeLocalSentimentClassifier, LocalSentimentClassifier
+from .sentiment_service import SentimentReanalysisService
 from .youtube import FetchConfig, YouTubeCommentClient, parse_youtube_video_id
 
 
@@ -33,6 +36,8 @@ app.add_middleware(
 store = AnalysisStore(DB_PATH, DATA_DIR)
 youtube_client = YouTubeCommentClient(DATA_DIR, FIXTURE_PATH)
 job_executor = ThreadPoolExecutor(max_workers=1)
+sentiment_classifier = FakeLocalSentimentClassifier() if os.getenv("SENTIMENT_FAKE_MODEL") == "1" else LocalSentimentClassifier()
+sentiment_service = SentimentReanalysisService(store, sentiment_classifier)
 
 
 class InspectRequest(BaseModel):
@@ -60,6 +65,10 @@ class SentimentActionsRequest(BaseModel):
     actions: list[dict[str, Any]]
 
 
+class SentimentReanalyzeRequest(BaseModel):
+    include_ai: bool = True
+
+
 class DataActionRequest(BaseModel):
     action: Literal["archive_run", "delete_run", "archive_youtube_cache", "delete_youtube_cache"]
     run_id: str | None = None
@@ -83,6 +92,7 @@ def settings() -> dict[str, Any]:
             {"value": "full", "label": "返信を追加取得して含める", "uses_extra_quota": True},
         ],
         "llm_provider": "codex_app_server",
+        "local_sentiment": sentiment_classifier.status(),
     }
 
 
@@ -125,6 +135,19 @@ def data_actions(request: DataActionRequest) -> dict[str, Any]:
 def export_run(run_id: str) -> dict[str, Any]:
     try:
         return store.export_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/{run_id}/sentiment-overrides/export", response_class=PlainTextResponse)
+def export_sentiment_overrides(run_id: str) -> PlainTextResponse:
+    try:
+        payload = store.export_sentiment_overrides_jsonl(run_id)
+        return PlainTextResponse(
+            payload,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="{run_id}-sentiment-overrides.jsonl"'},
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -223,6 +246,43 @@ def sentiment_actions(run_id: str, request: SentimentActionsRequest) -> dict[str
         return store.apply_sentiment_actions(run_id, request.actions)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/sentiment/reanalyze")
+def reanalyze_sentiment(run_id: str, request: SentimentReanalyzeRequest) -> dict[str, Any]:
+    try:
+        store.get_run_row(run_id)
+        active = store.find_active_sentiment_job(run_id)
+        if active:
+            return active
+        job_id = f"job_{uuid.uuid4().hex[:12]}"
+        store.create_job(job_id, store.active_job_count() + 1)
+        store.update_job(job_id, stage="sentiment_queued", run_id=run_id)
+        include_ai = request.include_ai and os.getenv("SENTIMENT_AI_ENABLED", "1") != "0"
+        job_executor.submit(process_sentiment_job, job_id, run_id, include_ai)
+        return store.get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def process_sentiment_job(job_id: str, run_id: str, include_ai: bool) -> None:
+    store.update_job(job_id, status="running", stage="sentiment_preparing", progress=0.05, run_id=run_id, queue_position=1)
+
+    def progress(stage: str, value: float) -> None:
+        store.update_job(job_id, status="running", stage=stage, progress=value, run_id=run_id)
+
+    try:
+        sentiment_service.reanalyze(run_id, include_ai=include_ai, progress=progress)
+        store.update_job(job_id, status="completed", stage="sentiment_completed", progress=1.0, run_id=run_id)
+    except Exception as exc:
+        store.update_job(
+            job_id,
+            status="failed",
+            stage="sentiment_failed",
+            progress=1.0,
+            run_id=run_id,
+            error_message=f"感情の再判定に失敗しました: {exc}",
+        )
 
 
 @app.post("/api/runs/{run_id}/continue")

@@ -600,7 +600,7 @@ def build_report_payload(
                 "rates": {label: 0.0 for label in ["positive", "neutral", "negative", "mixed", "unclear"]},
             },
         )
-    sentiment_review_count = len(sentiment.get("review_items") or [])
+    sentiment_review_count = int(sentiment.get("review_item_count") or len(sentiment.get("review_items") or []))
     return {
         "schema_version": "report.v2",
         "run_id": run_id,

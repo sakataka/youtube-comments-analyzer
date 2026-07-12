@@ -6,10 +6,12 @@ import {
   CommentsPage,
   RankingRow,
   Report,
+  RunJob,
   RunState,
   SentimentDistribution,
   SentimentLabel
 } from "../types";
+import { sentimentLabel, sentimentLabels, sentimentMethodLabel } from "../lib/sentiment";
 import { CommentsView } from "./CommentsView";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -27,6 +29,7 @@ type Props = {
   setSelectedPersonId: (personId: string) => void;
   aiInsight: AiInsight | null;
   aiBusy: boolean;
+  sentimentJob: RunJob | null;
   commentsPage: CommentsPage | null;
   commentsLoading: boolean;
   commentSearch: string;
@@ -75,6 +78,7 @@ export function ReportView(props: Props) {
             <Badge variant="outline" className={report.review.is_verified ? "report-status report-status--verified" : "report-status"}>
               {report.review.is_verified ? "確認済みレポート" : "暫定レポート"}
             </Badge>
+            {props.sentimentJob?.status === "queued" || props.sentimentJob?.status === "running" ? <Badge variant="outline" className="sentiment-job-status">{sentimentStageLabel(props.sentimentJob.stage)} {Math.round(props.sentimentJob.progress * 100)}%</Badge> : null}
           </div>
         </div>
       </section>
@@ -121,8 +125,9 @@ function Overview(props: Props) {
     <div className="report-grid">
       <div className="report-main">
         <section className="report-section sentiment-overview" aria-labelledby="reception-title">
-          <SectionHeading id="reception-title" title="この動画はどう受け取られた？" description="明示的な評価語はルールで、文脈が曖昧なコメントはAIで補助判定します。" aside={<span>{formatNumber(report.sentiment.overall.total)}件を分析</span>} />
+          <SectionHeading id="reception-title" title="この動画はどう受け取られた？" description="ルールとローカルモデルで判定し、反語や不一致などの難しいコメントだけをAIで補助します。" aside={<span>{formatNumber(report.sentiment.overall.total)}件を分析</span>} />
           <SentimentBar distribution={report.sentiment.overall} large onSelect={openSentimentComments} />
+          <SentimentMethodSummary report={report} />
         </section>
 
         <section className="report-section" aria-labelledby="people-title">
@@ -155,7 +160,10 @@ function Overview(props: Props) {
             <div><dt>取得範囲</dt><dd>{formatNumber(report.fetch_summary.max_comments_fetched)}件</dd></div>
             <div><dt>YouTube表示</dt><dd>{formatNumber(report.video.youtube_comment_count)}件</dd></div>
             <div><dt>AI感情補助</dt><dd>{aiStatusLabel(report.sentiment.ai_status)}</dd></div>
+            <div><dt>ローカルモデル</dt><dd>{localModelStatusLabel(report.sentiment.local_model?.status)}</dd></div>
+            <div><dt>AI送信</dt><dd>{formatNumber(report.sentiment.ai_summary?.assisted_comment_count ?? 0)}コメント</dd></div>
           </dl>
+          {report.sentiment.local_model?.model_id ? <p className="model-identity">{report.sentiment.local_model.model_id}<br /><code>{report.sentiment.local_model.revision}</code></p> : null}
           <p>{report.fetch_summary.coverage.message}</p>
         </section>
         <section>
@@ -263,18 +271,17 @@ function PersonTable({ rows, onSelect, selectedId }: { rows: RankingRow[]; onSel
 }
 
 function SentimentBar({ distribution, large = false, compact = false, onSelect }: { distribution: SentimentDistribution; large?: boolean; compact?: boolean; onSelect?: (label: SentimentLabel) => void }) {
-  const labels: SentimentLabel[] = ["positive", "neutral", "negative", "mixed", "unclear"];
   return (
     <div className={large ? "sentiment sentiment--large" : compact ? "sentiment sentiment--compact" : "sentiment"}>
       <div className="sentiment-bar" role={onSelect ? "group" : "img"} aria-label={sentimentAriaLabel(distribution)}>
-        {labels.map((label) => (
+        {sentimentLabels.map((label) => (
           onSelect ? <button type="button" className={`sentiment-bar__${label}`} style={{ width: `${distribution.rates[label] * 100}%` }} aria-label={`${sentimentLabel(label)}のコメントを表示`} title={`${sentimentLabel(label)} ${formatPercent(distribution.rates[label], 0)}`} onClick={() => onSelect(label)} key={label} />
             : <span className={`sentiment-bar__${label}`} style={{ width: `${distribution.rates[label] * 100}%` }} key={label} />
         ))}
       </div>
       {compact ? null : (
         <div className="sentiment-legend">
-          {labels.map((label) => (
+          {sentimentLabels.map((label) => (
             onSelect ? <button type="button" onClick={() => onSelect(label)} key={label}><i className={`legend-dot legend-dot--${label}`} />{sentimentLabel(label)} {formatPercent(distribution.rates[label], 0)}</button>
               : <span key={label}><i className={`legend-dot legend-dot--${label}`} />{sentimentLabel(label)} {formatPercent(distribution.rates[label], 0)}</span>
           ))}
@@ -313,17 +320,40 @@ function EvidenceRow({ comment }: { comment: { text_original: string; like_count
 }
 
 function sentimentAriaLabel(value: SentimentDistribution): string {
-  return (["positive", "neutral", "negative", "mixed", "unclear"] as SentimentLabel[])
+  return sentimentLabels
     .map((label) => `${sentimentLabel(label)} ${formatPercent(value.rates[label], 0)}`)
     .join("、");
 }
 
-function sentimentLabel(label: SentimentLabel): string {
-  return { positive: "ポジティブ", neutral: "ニュートラル", negative: "ネガティブ", mixed: "混合", unclear: "判断保留" }[label];
-}
-
 function aiStatusLabel(status: Report["sentiment"]["ai_status"]): string {
   if (status === "available") return "利用済み";
-  if (status === "failed") return "失敗・ルール結果を表示";
-  return "未実行・ルール結果を表示";
+  if (status === "partial") return "一部利用・未確定あり";
+  if (status === "failed") return "失敗・未確定はレビューへ";
+  return "未実行";
+}
+
+function localModelStatusLabel(status?: NonNullable<Report["sentiment"]["local_model"]>["status"]): string {
+  if (status === "available") return "利用済み";
+  if (status === "failed") return "利用失敗・縮退";
+  if (status === "disabled") return "無効";
+  return "未実行";
+}
+
+function SentimentMethodSummary({ report }: { report: Report }) {
+  const counts = report.sentiment.method_counts;
+  if (!counts) return <p className="sentiment-method-note">旧run・ローカルモデル未再判定</p>;
+  return (
+    <dl className="sentiment-method-summary" aria-label="判定方法別件数">
+      {(["rule", "local_model", "hybrid", "ai", "human"] as const).map((method) => (
+        <div key={method}><dt>{sentimentMethodLabel(method)}</dt><dd>{formatNumber(counts[method] ?? 0)}件</dd></div>
+      ))}
+    </dl>
+  );
+}
+
+function sentimentStageLabel(stage: string): string {
+  if (stage === "sentiment_local_model") return "ローカル判定中";
+  if (stage === "sentiment_ai_assist") return "AI補助中";
+  if (stage.startsWith("sentiment_persisting")) return "結果を保存中";
+  return stage === "sentiment_queued" ? "再判定待機中" : "感情を再判定中";
 }

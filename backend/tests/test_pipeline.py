@@ -1,8 +1,11 @@
 import json
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.app.alias_suggestions import extract_nickname_like_tokens
@@ -11,7 +14,8 @@ from backend.app.llm_assist import extract_completed_agent_text, parse_ai_insigh
 from backend.app.mention_classification import alias_matches
 from backend.app.pipeline import AnalysisStore
 from backend.app.report_builder import build_comment_clusters, person_feature_words
-from backend.app.sentiment import classify_sentiment
+from backend.app.sentiment import classify_sentiment, integrate_sentiment
+from backend.app.sentiment_service import SentimentReanalysisService
 from backend.app.text_filters import evaluation_terms, is_noise_keyword, keyword_tokens, person_alias_terms
 from backend.app.youtube import FetchConfig, YouTubeCommentClient
 
@@ -31,6 +35,49 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(classify_sentiment("最高だけど少し苦手")["label"], "mixed")
         self.assertEqual(classify_sentiment("最高")["label"], "positive")
         self.assertEqual(classify_sentiment("Aさんは最高。Bさんは苦手", ["Aさん"])["label"], "positive")
+
+    def test_sentiment_rules_flag_rhetorical_quotes_idioms_and_feasibility(self):
+        rhetorical = classify_sentiment("二宮またかわいくなってないか…？？")
+        self.assertEqual(rhetorical["label"], "positive")
+        self.assertIn("rhetorical_question", rhetorical["ambiguity_flags"])
+        self.assertTrue(rhetorical["needs_ai"])
+
+        idiom = classify_sentiment("下手にアドリブするよりムズいんじゃないか")
+        self.assertNotEqual(idiom["label"], "negative")
+        self.assertIn("idiom", idiom["ambiguity_flags"])
+
+        quoted = classify_sentiment("『残念！』という台詞の後の展開が面白かった")
+        self.assertEqual(quoted["label"], "positive")
+        self.assertIn("quote", quoted["ambiguity_flags"])
+
+        feasibility = classify_sentiment("この規模で毎週実現するのは無理だと思う")
+        self.assertNotEqual(feasibility["label"], "negative")
+        self.assertIn("feasibility", feasibility["ambiguity_flags"])
+
+    def test_sentiment_integration_agreement_conflict_low_confidence_and_failure(self):
+        rule = classify_sentiment("最高")
+        local = {
+            "status": "available",
+            "label": "positive",
+            "confidence": 0.94,
+            "probabilities": {"positive": 0.94, "neutral": 0.04, "negative": 0.02},
+        }
+        agreed = integrate_sentiment(rule, local, 0.8)
+        self.assertEqual((agreed["label"], agreed["method"], agreed["needs_ai"]), ("positive", "hybrid", False))
+
+        multiple_clauses = integrate_sentiment(classify_sentiment("今日は収録。動画は20分だった。"), {**local, "label": "neutral"}, 0.8)
+        self.assertEqual((multiple_clauses["label"], multiple_clauses["needs_ai"]), ("neutral", False))
+
+        conflict = integrate_sentiment(rule, {**local, "label": "negative"}, 0.8)
+        self.assertEqual(conflict["label"], "unclear")
+        self.assertIn("rule_model_conflict", conflict["review_reasons"])
+
+        low = integrate_sentiment(classify_sentiment("動画は20分だった"), {**local, "confidence": 0.55}, 0.8)
+        self.assertEqual(low["label"], "unclear")
+        self.assertIn("low_model_confidence", low["review_reasons"])
+
+        degraded = integrate_sentiment(rule, {"status": "failed", "error": "offline"}, 0.8)
+        self.assertEqual((degraded["label"], degraded["method"]), ("positive", "rule"))
 
     def test_sentiment_eval_fixture_meets_major_label_target(self):
         rows = [json.loads(line) for line in (ROOT / "fixtures" / "sentiment_eval_drawme.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -436,6 +483,164 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(verified_run["review_status"], "verified")
             self.assertEqual(store.get_latest_report(run_id)["review"]["status"], "verified")
 
+    def test_sentiment_reanalysis_preserves_comments_and_human_override(self):
+        class FakeClassifier:
+            config = SimpleNamespace(confidence_threshold=0.8, ai_max_comments=60, ai_batch_comments=30)
+
+            def predict(self, texts: list[str]) -> dict[str, dict[str, object]]:
+                output = {}
+                for text in set(texts):
+                    if any(term in text for term in ["最高", "好き", "面白", "かわい", "可愛"]):
+                        label = "positive"
+                    elif any(term in text for term in ["苦手", "つまら", "不快"]):
+                        label = "negative"
+                    else:
+                        label = "neutral"
+                    output[text] = {
+                        "status": "available",
+                        "label": label,
+                        "confidence": 0.92,
+                        "probabilities": {
+                            "positive": 0.92 if label == "positive" else 0.04,
+                            "neutral": 0.92 if label == "neutral" else 0.04,
+                            "negative": 0.92 if label == "negative" else 0.04,
+                        },
+                        "model_id": "fake/sentiment",
+                        "revision": "test-revision",
+                        "device": "cpu",
+                        "input_truncated": False,
+                    }
+                return output
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+                bundle = client.fetch_video_bundle(
+                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
+                )
+            store = self.store(data_dir / "app.sqlite3", data_dir)
+            run_id = store.create_run(
+                bundle,
+                {"max_comments": 20, "reply_fetch_mode": "none", "fetch_order": "relevance"},
+            )
+            before = {
+                row["id"]: row["text_original"]
+                for row in store.comments_for_snapshot(store.get_run_row(run_id)["comment_snapshot_id"])
+            }
+            entered = threading.Event()
+            release = threading.Event()
+
+            class SlowClassifier(FakeClassifier):
+                def predict(self, texts: list[str]) -> dict[str, dict[str, object]]:
+                    entered.set()
+                    release.wait(timeout=2)
+                    return super().predict(texts)
+
+            background_errors: list[Exception] = []
+
+            def run_slow_reanalysis() -> None:
+                try:
+                    SentimentReanalysisService(store, SlowClassifier()).reanalyze(run_id, include_ai=False)
+                except Exception as exc:
+                    background_errors.append(exc)
+
+            thread = threading.Thread(target=run_slow_reanalysis)
+            thread.start()
+            self.assertTrue(entered.wait(timeout=2))
+            started = time.perf_counter()
+            self.assertEqual(store.count_runs(), 1)
+            self.assertLess(time.perf_counter() - started, 0.2)
+            release.set()
+            thread.join(timeout=3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(background_errors, [])
+
+            service = SentimentReanalysisService(store, FakeClassifier())
+            report = service.reanalyze(run_id, include_ai=False)
+            self.assertEqual(report["sentiment"]["local_model"]["status"], "available")
+            self.assertEqual(report["sentiment"]["local_model"]["model_id"], "fake/sentiment")
+            self.assertEqual(sum(report["sentiment"]["method_counts"].values()), report["sentiment"]["overall"]["total"])
+            comments = store.get_comments_page(run_id, limit=20, offset=0)["comments"]
+            self.assertTrue(all(comment["sentiment_method"] in {"local_model", "hybrid", "rule"} for comment in comments))
+            self.assertTrue(all(comment["sentiment_model_revision"] == "test-revision" for comment in comments))
+
+            class FakeLlm:
+                def __init__(self):
+                    self.prompts: list[str] = []
+
+                def ask(self, prompt: str) -> str:
+                    self.prompts.append(prompt)
+                    payload = json.loads(prompt.split("input:\n", 1)[1])
+                    self.assert_review_only(payload)
+                    return json.dumps({
+                        "sentiment_recommendations": [
+                            {
+                                "comment_id": item["comment_id"],
+                                "target_type": item["target_type"],
+                                "target_id": item["target_id"],
+                                "label": "positive",
+                                "confidence": "medium",
+                                "reason": "固定出力によるテスト",
+                            }
+                            for item in payload["targets"]
+                        ],
+                    }, ensure_ascii=False)
+
+                def assert_review_only(self, payload: dict[str, object]) -> None:
+                    rows = payload["targets"]
+                    assert isinstance(rows, list)
+                    assert all(row["review_reasons"] for row in rows)
+
+            fake_llm = FakeLlm()
+            ai_report = service.reanalyze(run_id, include_ai=True, client=fake_llm)
+            self.assertGreater(ai_report["sentiment"]["method_counts"]["ai"], 0)
+            self.assertEqual(ai_report["sentiment"]["ai_status"], "available")
+            self.assertTrue(fake_llm.prompts)
+            self.assertNotIn("author_display_name", fake_llm.prompts[0])
+
+            store.conn.execute("delete from llm_cache")
+            store.conn.commit()
+
+            class FailingLlm:
+                def ask(self, prompt: str) -> str:
+                    raise RuntimeError("codex app server timeout")
+
+            failed_report = service.reanalyze(run_id, include_ai=True, client=FailingLlm())
+            self.assertEqual(failed_report["sentiment"]["local_model"]["status"], "available")
+            self.assertEqual(failed_report["sentiment"]["ai_status"], "failed")
+            self.assertTrue(any("ai_failed" in item["review_reasons"] for item in failed_report["sentiment"]["review_items"]))
+
+            review_item = report["sentiment"]["review_items"][0]
+            store.apply_sentiment_actions(run_id, [{
+                "comment_id": review_item["comment_id"],
+                "target_type": review_item["target_type"],
+                "target_id": review_item["target_id"],
+                "label": "positive",
+            }])
+            rerun = service.reanalyze(run_id, include_ai=False)
+            human = store.conn.execute(
+                """
+                select label, method, evidence_json from sentiment_labels
+                where analysis_run_id = ? and comment_id = ? and target_type = ?
+                  and ((target_id = ?) or (target_id is null and ? is null))
+                """,
+                (run_id, review_item["comment_id"], review_item["target_type"], review_item["target_id"], review_item["target_id"]),
+            ).fetchone()
+            self.assertEqual((human["label"], human["method"]), ("positive", "human"))
+            self.assertIn("human_override", json.loads(human["evidence_json"]))
+            self.assertEqual(rerun["sentiment"]["method_counts"]["human"], 1)
+            exported_override = store.export_sentiment_overrides_jsonl(run_id)
+            self.assertIn('"source": "human_override"', exported_override)
+            self.assertIn(review_item["comment_id"], exported_override)
+            after = {
+                row["id"]: row["text_original"]
+                for row in store.comments_for_snapshot(store.get_run_row(run_id)["comment_snapshot_id"])
+            }
+            self.assertEqual(after, before)
+            self.assertTrue((data_dir / "runs" / run_id / "sentiment_labels.jsonl").exists())
+
     def test_inline_subset_replies_are_saved_and_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
@@ -545,6 +750,8 @@ class PipelineTest(unittest.TestCase):
             deleted = store.delete_run(run_id)
             self.assertEqual(deleted["status"], "deleted")
             self.assertFalse((data_dir / "archive" / "runs" / run_id).exists())
+            self.assertEqual(store.conn.execute("select count(*) from sentiment_labels where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
+            self.assertEqual(store.conn.execute("select count(*) from sentiment_overrides where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
 
     def test_youtube_cache_archive_and_delete(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -783,7 +990,7 @@ class PipelineTest(unittest.TestCase):
 {"candidate_recommendations":[],"alias_recommendations":[],"ambiguous_comments":[],"notes":["ok"]}
 ```"""
         )
-        self.assertEqual(parsed["schema_version"], "llm_assist.v2")
+        self.assertEqual(parsed["schema_version"], "llm_assist.v3")
 
     def test_ai_insight_prompt_and_cache_flow(self):
         class FakeInsightClient:

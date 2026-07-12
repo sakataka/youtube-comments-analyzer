@@ -26,7 +26,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - 取得済みコメント内のいいね数分布を表示する
 - 概要ダッシュボードで採用人物数、紐づけ済みコメント数、トップ人物を確認する
 - 動画全体と人物別に `positive / neutral / negative / mixed / unclear` を集計する
-- 明示的な評価語と否定表現はルールで判定し、曖昧な文脈だけを AI 補助に回す
+- ルール、固定revisionのローカル日本語モデル、難例だけのAI補助という三段階で感情を判定する
 - 感情判定ごとに confidence、method、根拠語句、対象人物を保存する
 - 暫定レポートを先に表示し、レビュー完了状態を `provisional / verified` として永続化する
 - 分析 job を SQLite に保存し、再起動後も失敗状態と理由を復元する
@@ -35,7 +35,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - 既存 alias にないニックネームらしい頻出表記を未知 alias 候補として表示する
 - 未知 alias 候補を既存人物へ追加し、再集計できる
 - Codex app server 経由で LLM 補助分析を実行する
-- 新規分析時はルール結果を先に表示し、その後に LLM 補助分析と候補・alias 提案を反映する
+- 新規分析時はルール結果を先に表示し、その後にローカルモデルと難例だけのLLM補助をバックグラウンドで反映する
 - LLM 補助分析で候補整理、alias 補完案、曖昧コメント分類を確認する。曖昧コメントは自動で人物へ紐づけない
 - LLM 補助分析の入力 hash を cache し、同一入力では再利用する
 - 人間チェック後の分析結果サマリーを AI に渡し、任意でコメント状況のインサイトを抽出する
@@ -77,7 +77,7 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -r backend/requirements.txt
+uv pip install --python .venv/bin/python -r backend/requirements.txt
 bun install
 ```
 
@@ -96,9 +96,17 @@ YOUTUBE_API_KEY=
 DATABASE_URL=
 DATA_DIR=
 YOUTUBE_FIXTURE_FALLBACK=
+SENTIMENT_LOCAL_MODEL_ENABLED=1
+SENTIMENT_MODEL_ID=
+SENTIMENT_MODEL_REVISION=
+SENTIMENT_CONFIDENCE_THRESHOLD=
+SENTIMENT_MODEL_DEVICE=auto
+SENTIMENT_MODEL_CACHE_DIR=
 ```
 
 `YOUTUBE_API_KEY` が空の場合、cache がある動画だけを再分析できます。未cacheの実動画は fixture で代用せず、設定エラーとして止めます。テスト用 fixture を明示的に使う場合だけ `YOUTUBE_FIXTURE_FALLBACK=1` を設定します。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。
+
+ローカル感情モデルは既定で有効です。モデルID、revision、閾値の既定値は `backend/app/sentiment_model_config.json` に固定され、環境変数は一時的な上書きにだけ使います。`SENTIMENT_MODEL_DEVICE=auto` はMPSを優先し、失敗時は同じrunをCPUで再実行します。モデルファイルは `data/model_cache/` に保存され、Gitには追加されません。
 
 ## 起動
 
@@ -152,9 +160,12 @@ curl -X POST http://127.0.0.1:8000/api/videos/inspect \
 bun run test
 bun run build
 bun run test:e2e
+bun run eval:sentiment
 ```
 
 `bun run test` は live API を使わず、fixture で integration test を通します。評価 fixture では人物言及の precision 90%以上・recall 85%以上と、主要感情3分類の macro-F1 80%以上を下限として検証します。`bun run test:e2e` はデスクトップ 1280px とモバイル 420×912pxで暫定レポートから根拠コメントまでの導線を検証します。
+
+通常テストとE2Eはfake modelを使い、モデルダウンロードを行いません。`bun run eval:sentiment` だけが固定revisionの実モデルを比較し、macro F1、混同行列、閾値、速度、メモリを `/tmp/youtube-comments-analyzer-sentiment-evaluation.json` へ出力します。採用結果は `docs/sentiment-model-evaluation.md` に記録しています。
 
 ## コメント取得データの保存と再利用
 
@@ -223,6 +234,8 @@ AI インサイトは分析確定後の任意実行です。個別コメント�
 - `POST /api/runs/{run_id}/candidate-actions`
 - `POST /api/runs/{run_id}/comment-actions`
 - `POST /api/runs/{run_id}/sentiment-actions`
+- `POST /api/runs/{run_id}/sentiment/reanalyze`
+- `GET /api/runs/{run_id}/sentiment-overrides/export`
 - `POST /api/runs/{run_id}/continue`
 - `POST /api/runs/{run_id}/review/complete`
 - `POST /api/runs/{run_id}/llm-assist`

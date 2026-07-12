@@ -1,4 +1,6 @@
 export type SentimentLabel = "positive" | "neutral" | "negative" | "mixed" | "unclear";
+export type SentimentMethod = "rule" | "local_model" | "hybrid" | "ai" | "human";
+export type SentimentReviewReason = "ai_failed" | "ai_unresolved" | "ai_capacity_deferred" | "rule_model_conflict" | "local_model_failed" | "low_model_confidence" | "mixed_candidate" | "input_truncated" | "ambiguous_expression";
 
 export type SentimentDistribution = {
   total: number;
@@ -13,6 +15,15 @@ export type SettingsInfo = {
   max_comments: { default: number; min: number; max: number };
   reply_fetch_modes: Array<{ value: ReplyMode; label: string; uses_extra_quota: boolean }>;
   llm_provider: string;
+  local_sentiment: {
+    status: "not_loaded" | "available" | "failed" | "disabled";
+    model_id: string;
+    revision: string;
+    license: string;
+    confidence_threshold: number;
+    device: string;
+    failure_reason?: string | null;
+  };
 };
 
 export type DataSummary = {
@@ -157,8 +168,34 @@ export type SentimentReviewItem = {
   target_display_name?: string | null;
   label: SentimentLabel;
   confidence: number;
-  method: string;
-  evidence: { terms?: string[]; scope_text?: string; ai_reason?: string };
+  method: SentimentMethod;
+  review_reasons: SentimentReviewReason[];
+  evidence: SentimentEvidence;
+};
+
+export type SentimentEvidence = {
+  schema_version?: string;
+  rule?: {
+    label?: SentimentLabel;
+    confidence?: number;
+    matched_terms?: Array<{ term: string; effective_polarity?: string; negated?: boolean; ignored_reason?: string | null }>;
+    negations?: string[];
+    scope_text?: string;
+    scope_type?: string;
+    ambiguity_flags?: string[];
+  };
+  local_model?: {
+    status?: string;
+    model_id?: string;
+    revision?: string;
+    confidence?: number;
+    probabilities?: Partial<Record<"positive" | "neutral" | "negative", number>>;
+    device?: string;
+    error?: string;
+  };
+  integration?: { label?: SentimentLabel; reason?: string; review_reasons?: SentimentReviewReason[] };
+  ai?: { status?: string; reason?: string; confidence?: string };
+  human_override?: { label: SentimentLabel; created_at: string };
 };
 
 export type Report = {
@@ -171,7 +208,25 @@ export type Report = {
   sentiment: {
     method: "hybrid";
     rule_status: string;
-    ai_status: "not_run" | "available" | "failed";
+    pipeline_version?: string;
+    generation_id?: string | null;
+    ai_status: "not_run" | "available" | "partial" | "failed";
+    local_model?: {
+      status: "available" | "failed" | "not_run" | "disabled";
+      model_id?: string | null;
+      revision?: string | null;
+      confidence_threshold?: number | null;
+      device?: string | null;
+      failure_reason?: string | null;
+    };
+    ai_summary?: {
+      assisted_comment_count: number;
+      applied_label_count: number;
+      failed_label_count: number;
+      eligible_label_count: number;
+    };
+    method_counts?: Record<SentimentMethod, number>;
+    review_item_count?: number;
     overall: SentimentDistribution;
     per_person: Array<{
       person_id: string;
@@ -212,6 +267,12 @@ export type ReportComment = {
   like_count: number;
   is_reply: boolean;
   sentiment_label: SentimentLabel;
+  sentiment_method: SentimentMethod;
+  sentiment_confidence: number;
+  sentiment_model_id?: string | null;
+  sentiment_model_revision?: string | null;
+  sentiment_reason?: string | null;
+  sentiment_is_human_override: boolean;
   mentioned_persons: Array<{ person_id: string; display_name: string; confidence: number; match_method: string }>;
 };
 
