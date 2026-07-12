@@ -14,6 +14,7 @@ from .text import normalize_alias, normalize_text
 from .alias_suggestions import build_alias_suggestions
 from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
 from .llm_assist import (
+    AI_INSIGHT_OUTPUT_SCHEMA,
     CodexAppServerClient,
     INSIGHT_PROMPT_VERSION,
     LlmClient,
@@ -38,6 +39,49 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def build_sentiment_timeline(rows: list[Any], video_published_at: str | None) -> list[dict[str, Any]]:
+    parsed = [(row, parse_timestamp(row["published_at"])) for row in rows]
+    parsed = [(row, published_at) for row, published_at in parsed if published_at is not None]
+    if not parsed:
+        return []
+    anchor = parse_timestamp(video_published_at) or min(published_at for _, published_at in parsed)
+    phases = [
+        (0, 1, "公開後1時間"),
+        (1, 3, "1〜3時間"),
+        (3, 6, "3〜6時間"),
+        (6, 12, "6〜12時間"),
+        (12, 24, "12〜24時間"),
+        (24, 72, "1〜3日"),
+        (72, 168, "3〜7日"),
+        (168, float("inf"), "7日以降"),
+    ]
+    timeline = []
+    for start_hour, end_hour, label in phases:
+        phase_rows = [
+            row
+            for row, published_at in parsed
+            if start_hour <= max(0.0, (published_at - anchor).total_seconds() / 3600) < end_hour
+        ]
+        if not phase_rows:
+            continue
+        timeline.append({
+            "label": label,
+            "comment_count": len(phase_rows),
+            "like_count": sum(int(row["like_count"]) for row in phase_rows),
+            "distribution": sentiment_distribution(row["label"] for row in phase_rows),
+        })
+    return timeline
+
+
 def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
     return {
         "schema_version": "llm_assist.v3",
@@ -57,7 +101,7 @@ def build_failed_llm_assist(input_hash: str, exc: Exception) -> dict[str, Any]:
 
 def build_failed_ai_insight(input_hash: str, exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": "ai_insight.v2",
+        "schema_version": "ai_insight.v3",
         "prompt_version": INSIGHT_PROMPT_VERSION,
         "provider": "codex_app_server",
         "source": "codex_app_server",
@@ -66,9 +110,12 @@ def build_failed_ai_insight(input_hash: str, exc: Exception) -> dict[str, Any]:
         "error_message": str(exc),
         "headline": "",
         "summary": "",
+        "dominant_reception": "",
+        "reaction_concentration": "",
+        "timeline_interpretation": "",
+        "surprising_pattern": "",
         "insights": [],
         "watch_points": [],
-        "suggested_next_questions": [],
     }
 
 
@@ -1174,9 +1221,11 @@ class AnalysisStore:
         return report
 
     def get_sentiment_analysis(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run_row(run_id)
+        video = self.conn.execute("select published_at from videos where id = ?", (run["video_id"],)).fetchone()
         rows = self.conn.execute(
             """
-            select s.*, c.text_original, c.like_count, p.display_name
+            select s.*, c.text_original, c.like_count, c.published_at, p.display_name
             from sentiment_labels s
             join comments c on c.id = s.comment_id
             left join persons p on p.id = s.target_id
@@ -1280,6 +1329,7 @@ class AnalysisStore:
             "method_counts": method_counts,
             "review_item_count": len(all_review_rows),
             "overall": sentiment_distribution(row["label"] for row in overall_rows),
+            "timeline": build_sentiment_timeline(overall_rows, video["published_at"] if video else None),
             "per_person": per_person,
             "review_items": [
                 {
@@ -1351,7 +1401,7 @@ class AnalysisStore:
             self.persist_report(run_id, self.build_report(run_id))
             return result
 
-        active_client = client or CodexAppServerClient()
+        active_client = client or CodexAppServerClient(effort="medium", output_schema=AI_INSIGHT_OUTPUT_SCHEMA)
         raw_text = None
         try:
             raw_text = active_client.ask(prompt)

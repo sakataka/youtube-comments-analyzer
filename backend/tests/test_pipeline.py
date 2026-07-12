@@ -12,7 +12,7 @@ from backend.app.alias_suggestions import extract_nickname_like_tokens
 from backend.app.candidate_extraction import build_candidate_seeds, extract_candidate_tokens, extract_description_person_list_tokens
 from backend.app.llm_assist import extract_completed_agent_text, parse_ai_insight_json, parse_llm_assist_json
 from backend.app.mention_classification import alias_matches
-from backend.app.pipeline import AnalysisStore
+from backend.app.pipeline import AnalysisStore, build_sentiment_timeline
 from backend.app.report_builder import build_comment_clusters, person_feature_words
 from backend.app.sentiment import classify_sentiment, integrate_sentiment
 from backend.app.sentiment_service import SentimentReanalysisService
@@ -96,6 +96,17 @@ class PipelineTest(unittest.TestCase):
             recall = true_positive / max(true_positive + false_negative, 1)
             f1_scores.append(2 * precision * recall / max(precision + recall, 1e-9))
         self.assertGreaterEqual(sum(f1_scores) / len(f1_scores), 0.8)
+
+    def test_sentiment_timeline_groups_reception_after_publication(self):
+        rows = [
+            {"published_at": "2026-07-11T10:15:00Z", "like_count": 12, "label": "positive"},
+            {"published_at": "2026-07-11T12:00:00Z", "like_count": 3, "label": "neutral"},
+            {"published_at": "2026-07-11T17:00:00Z", "like_count": 1, "label": "negative"},
+        ]
+        timeline = build_sentiment_timeline(rows, "2026-07-11T10:00:00Z")
+        self.assertEqual([item["label"] for item in timeline], ["公開後1時間", "1〜3時間", "6〜12時間"])
+        self.assertEqual(timeline[0]["distribution"]["counts"]["positive"], 1)
+        self.assertEqual(timeline[0]["like_count"], 12)
 
     def test_mention_eval_fixture_meets_precision_and_recall_targets(self):
         rows = [json.loads(line) for line in (ROOT / "fixtures" / "sentiment_eval_drawme.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -1004,6 +1015,10 @@ class PipelineTest(unittest.TestCase):
                     {
                         "headline": "コメント欄は主要人物への好意的反応が中心",
                         "summary": "上位ランキングとクラスタから、人物別の反応と掛け合いへの言及が目立つ。",
+                        "dominant_reception": "出演者への好意と掛け合いの面白さが中心。",
+                        "reaction_concentration": "主要人物への言及に反応が集まった。",
+                        "timeline_interpretation": "公開直後にコメントが集中した。",
+                        "surprising_pattern": "人物名を含まない称賛も多い。",
                         "insights": [
                             {
                                 "title": "上位人物に反応が集中",
@@ -1044,11 +1059,13 @@ class PipelineTest(unittest.TestCase):
 
             self.assertEqual(fake.calls, 1)
             self.assertEqual(cached["source"], "cache")
-            self.assertEqual(result["schema_version"], "ai_insight.v2")
+            self.assertEqual(result["schema_version"], "ai_insight.v3")
             self.assertEqual(latest["headline"], "コメント欄は主要人物への好意的反応が中心")
             self.assertTrue((data_dir / "runs" / run_id / "ai_insight.json").exists())
             self.assertIn("mention_ranking", fake.last_prompt)
             self.assertIn("representative_comments", fake.last_prompt)
+            self.assertIn("視聴者にどう受け取られたか", fake.last_prompt)
+            self.assertIn("timeline", fake.last_prompt)
             self.assertNotIn("author_display_name", fake.last_prompt)
 
     def test_ai_insight_json_parser_accepts_fenced_json(self):
@@ -1057,7 +1074,7 @@ class PipelineTest(unittest.TestCase):
 {"headline":"h","summary":"s","insights":[],"watch_points":["w"],"suggested_next_questions":[]}
 ```"""
         )
-        self.assertEqual(parsed["schema_version"], "ai_insight.v2")
+        self.assertEqual(parsed["schema_version"], "ai_insight.v3")
 
     def test_ai_insight_json_parser_normalizes_v1_fields(self):
         parsed = parse_ai_insight_json(

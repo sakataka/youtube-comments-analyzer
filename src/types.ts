@@ -228,6 +228,12 @@ export type Report = {
     method_counts?: Record<SentimentMethod, number>;
     review_item_count?: number;
     overall: SentimentDistribution;
+    timeline?: Array<{
+      label: string;
+      comment_count: number;
+      like_count: number;
+      distribution: SentimentDistribution;
+    }>;
     per_person: Array<{
       person_id: string;
       display_name: string;
@@ -285,10 +291,14 @@ export type CommentsPage = {
 };
 
 export type AiInsight = {
-  schema_version?: "ai_insight.v1" | "ai_insight.v2";
+  schema_version?: "ai_insight.v1" | "ai_insight.v2" | "ai_insight.v3";
   status?: string;
   headline: string;
   summary: string;
+  dominant_reception?: string;
+  reaction_concentration?: string;
+  timeline_interpretation?: string;
+  surprising_pattern?: string;
   insights: Array<{
     conclusion?: string;
     interpretation?: string;

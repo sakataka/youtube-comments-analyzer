@@ -201,7 +201,7 @@ export default function App() {
     try {
       const insight = await api<AiInsight>(`/api/runs/${run.run_id}/ai-insight`, { method: "POST" });
       setAiInsight(insight);
-      if (insight.status === "failed") setNotice("AIサマリーを利用できませんでした。通常の分析結果は有効です。");
+      if (insight.status === "failed") setNotice("AIインサイトを利用できませんでした。通常の分析結果は有効です。");
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
