@@ -318,7 +318,10 @@ export default function App() {
     setError(null);
     setView("overview");
     window.history.replaceState(null, "", window.location.pathname);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({
+      top: 0,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    });
   }
 
   return (
