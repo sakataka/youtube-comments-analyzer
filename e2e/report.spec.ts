@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("設定Dialogはフォーカスを管理しEscで閉じる", async ({ page }) => {
   await page.goto("/");
@@ -11,6 +11,32 @@ test("設定Dialogはフォーカスを管理しEscで閉じる", async ({ page 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(settingsButton).toBeFocused();
+});
+
+test("最近の分析を個別削除・一括削除できる", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "履歴削除の統合確認はdesktopで代表実行する");
+  await page.request.post("/api/data/actions", { data: { action: "delete_all_runs" } });
+  await createFixtureRun(page);
+  await createFixtureRun(page);
+  await page.goto("/");
+
+  await expect(page.locator(".recent-actions")).toContainText("2件");
+  const firstDelete = page.getByRole("button", { name: /を削除$/ }).first();
+  await firstDelete.click();
+  const individualDialog = page.getByRole("alertdialog", { name: "この分析結果を削除しますか？" });
+  await expect(individualDialog).toContainText("YouTubeコメントのキャッシュは削除しません");
+  await individualDialog.getByRole("button", { name: "キャンセル" }).click();
+  await expect(firstDelete).toBeFocused();
+
+  await firstDelete.click();
+  await individualDialog.getByRole("button", { name: "削除", exact: true }).click();
+  await expect(page.locator(".recent-actions")).toContainText("1件");
+
+  await page.getByRole("button", { name: "すべて削除" }).click();
+  const allDialog = page.getByRole("alertdialog", { name: "1件の分析結果をすべて削除しますか？" });
+  await expect(allDialog).toContainText("この操作は元に戻せません");
+  await allDialog.getByRole("button", { name: "すべて削除" }).click();
+  await expect(page.getByText("まだ分析結果はありません。")).toBeVisible();
 });
 
 test("暫定レポートから人物・コメントの根拠へ移動できる", async ({ page }) => {
@@ -77,6 +103,25 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
   expect(theme.background).not.toBe("");
   expect(theme.dark).toBe(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches));
 });
+
+async function createFixtureRun(page: Page) {
+  const createdResponse = await page.request.post("/api/runs", {
+    data: {
+      url: "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+      max_comments: 10,
+      reply_fetch_mode: "none",
+      fetch_order: "relevance",
+      force_refresh: false
+    }
+  });
+  expect(createdResponse.ok()).toBe(true);
+  const created = await createdResponse.json() as { job_id: string };
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/jobs/${created.job_id}`);
+    const job = await response.json() as { status: string };
+    return job.status;
+  }, { timeout: 30_000 }).toBe("completed");
+}
 
 test("三段階再判定と人の修正がコメント詳細へ反映される", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "状態更新の統合確認はdesktopで代表実行する");

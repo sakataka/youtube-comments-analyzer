@@ -70,7 +70,7 @@ class SentimentReanalyzeRequest(BaseModel):
 
 
 class DataActionRequest(BaseModel):
-    action: Literal["archive_run", "delete_run", "archive_youtube_cache", "delete_youtube_cache"]
+    action: Literal["archive_run", "delete_run", "delete_all_runs", "archive_youtube_cache", "delete_youtube_cache"]
     run_id: str | None = None
 
 
@@ -122,6 +122,8 @@ def data_actions(request: DataActionRequest) -> dict[str, Any]:
             if not request.run_id:
                 raise HTTPException(status_code=400, detail="run_id is required")
             return store.delete_run(request.run_id)
+        if request.action == "delete_all_runs":
+            return store.delete_all_runs()
         if request.action == "archive_youtube_cache":
             return store.archive_youtube_cache()
         if request.action == "delete_youtube_cache":

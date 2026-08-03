@@ -2014,6 +2014,17 @@ class AnalysisStore:
                 shutil.rmtree(path)
         return {"status": "deleted", "run_id": run_id}
 
+    def delete_all_runs(self) -> dict[str, Any]:
+        run_ids = [
+            row["id"]
+            for row in self.conn.execute(
+                "select id from analysis_runs where status != 'archived' order by created_at desc"
+            ).fetchall()
+        ]
+        for run_id in run_ids:
+            self.delete_run(run_id)
+        return {"status": "deleted", "deleted_count": len(run_ids)}
+
     def export_sentiment_overrides_jsonl(self, run_id: str) -> str:
         self.get_run_row(run_id)
         rows = self.conn.execute(

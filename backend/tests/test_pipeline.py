@@ -764,6 +764,29 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(store.conn.execute("select count(*) from sentiment_labels where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
             self.assertEqual(store.conn.execute("select count(*) from sentiment_overrides where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
 
+            run_ids = [
+                store.create_run(
+                    bundle,
+                    {
+                        "max_comments": 10,
+                        "reply_fetch_mode": "none",
+                        "fetch_order": "relevance",
+                        "use_llm": False,
+                        "use_embeddings": False,
+                    },
+                )
+                for _ in range(2)
+            ]
+            cache_marker = data_dir / "youtube_cache" / "keep.jsonl"
+            cache_marker.parent.mkdir(parents=True, exist_ok=True)
+            cache_marker.write_text("{}", encoding="utf-8")
+            deleted_all = store.delete_all_runs()
+            self.assertEqual(deleted_all, {"status": "deleted", "deleted_count": 2})
+            self.assertEqual(store.count_runs(), 0)
+            self.assertEqual(store.list_runs(), [])
+            self.assertTrue(cache_marker.exists())
+            self.assertFalse(any((data_dir / "runs" / item).exists() for item in run_ids))
+
     def test_youtube_cache_archive_and_delete(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

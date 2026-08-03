@@ -283,8 +283,29 @@ export default function App() {
   }
 
   async function refreshHistory() {
-    const runList = await api<{ runs: RunState[] }>("/api/runs");
+    const [runList, nextData] = await Promise.all([
+      api<{ runs: RunState[] }>("/api/runs"),
+      api<DataSummary>("/api/data/summary")
+    ]);
     setHistory(runList.runs);
+    setDataSummary(nextData);
+  }
+
+  async function deleteRuns(runId?: string) {
+    setBusy(true);
+    try {
+      const action = runId ? "delete_run" : "delete_all_runs";
+      const result = await api<{ deleted_count?: number }>("/api/data/actions", {
+        method: "POST",
+        body: JSON.stringify({ action, run_id: runId })
+      });
+      await refreshHistory();
+      setNotice(runId ? "分析結果を削除しました。" : `${result.deleted_count ?? 0}件の分析結果を削除しました。`);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function dataAction(action: "archive_youtube_cache" | "delete_youtube_cache") {
@@ -367,10 +388,12 @@ export default function App() {
           setForceRefresh={setForceRefresh}
           settings={settings}
           history={history}
+          historyCount={dataSummary?.run_count ?? history.length}
           busy={busy}
           job={job}
           onSubmit={startRun}
           onOpenRun={openRun}
+          onDeleteRun={deleteRuns}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       )}
