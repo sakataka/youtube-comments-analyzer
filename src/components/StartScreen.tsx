@@ -8,6 +8,7 @@ import { Input } from "./ui/input";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { AppHeader } from "./AppHeader";
 import { SectionHeading } from "./SectionHeading";
+import { SectionMarker } from "./SectionMarker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import { Trash2Icon } from "lucide-react";
 
@@ -71,9 +72,11 @@ export function StartScreen({
     <main className="start-shell">
       <AppHeader onOpenSettings={onOpenSettings} />
 
-      <section className="start-hero" aria-labelledby="start-title">
-        <h1 id="start-title">YouTubeコメントを分析</h1>
-        <form className="analysis-form" onSubmit={onSubmit}>
+      <div className="indexed-section start-hero-section">
+        <SectionMarker index="01" label="ANALYZE" />
+        <section className="start-hero" aria-labelledby="start-title">
+          <h1 id="start-title">YouTubeコメントを分析</h1>
+          <form className="analysis-form" onSubmit={onSubmit}>
           <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">
             <Input
@@ -131,44 +134,48 @@ export function StartScreen({
               <progress max={1} value={job.progress} />
             </div>
           ) : null}
-        </form>
-      </section>
+          </form>
+        </section>
+      </div>
 
-      <section className="recent-runs" aria-labelledby="recent-title">
-        <SectionHeading
-          compact
-          id="recent-title"
-          title="最近の分析"
-          description="保存済みのレポートを、そのまま続きから開けます。"
-          aside={history.length ? (
-            <div className="recent-actions">
-              <span>{historyCount}件</span>
-              <Button variant="destructive" size="sm" type="button" disabled={busy} onClick={(event) => openDeleteDialog(event.currentTarget, { type: "all" })}>すべて削除</Button>
-            </div>
-          ) : <span>0件</span>}
-        />
-        {history.length ? (
-          <div className="recent-list">
-            {history.slice(0, 6).map((item) => (
-              <div className="recent-row" key={item.run_id}>
-                <Button className="recent-row__open" variant="ghost" type="button" disabled={busy} onClick={() => onOpenRun(item.run_id)}>
-                  <span className="recent-row__title">{runTitle(item)}</span>
-                  <span>{item.video?.channel_title || "チャンネル未取得"}</span>
-                  <span>
-                    {formatNumber(item.fetch_summary?.max_comments_fetched)}件・
-                    {item.review_status === "verified" ? "確認済み" : "暫定"}
-                  </span>
-                </Button>
-                <Button className="recent-row__delete" variant="ghost" size="icon" type="button" disabled={busy} aria-label={`「${runTitle(item)}」を削除`} onClick={(event) => openDeleteDialog(event.currentTarget, { type: "one", run: item })}>
-                  <Trash2Icon />
-                </Button>
+      <div className="indexed-section recent-section">
+        <SectionMarker index="02" label="RECENT" />
+        <section className="recent-runs" aria-labelledby="recent-title">
+          <SectionHeading
+            compact
+            id="recent-title"
+            title="最近の分析"
+            description="保存済みのレポートを、そのまま続きから開けます。"
+            aside={history.length ? (
+              <div className="recent-actions">
+                <span>{historyCount}件</span>
+                <Button variant="destructive" size="sm" type="button" disabled={busy} onClick={(event) => openDeleteDialog(event.currentTarget, { type: "all" })}>すべて削除</Button>
               </div>
-            ))}
-          </div>
-        ) : (
-          <p className="empty-state">まだ分析結果はありません。</p>
-        )}
-      </section>
+            ) : <span>0件</span>}
+          />
+          {history.length ? (
+            <div className="recent-list">
+              {history.slice(0, 6).map((item) => (
+                <div className="recent-row" key={item.run_id}>
+                  <Button className="recent-row__open" variant="ghost" type="button" disabled={busy} onClick={() => onOpenRun(item.run_id)}>
+                    <span className="recent-row__title">{runTitle(item)}</span>
+                    <span>{item.video?.channel_title || "チャンネル未取得"}</span>
+                    <span>
+                      {formatNumber(item.fetch_summary?.max_comments_fetched)}件・
+                      {item.review_status === "verified" ? "確認済み" : "暫定"}
+                    </span>
+                  </Button>
+                  <Button className="recent-row__delete" variant="ghost" size="icon" type="button" disabled={busy} aria-label={`「${runTitle(item)}」を削除`} onClick={(event) => openDeleteDialog(event.currentTarget, { type: "one", run: item })}>
+                    <Trash2Icon />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-state">まだ分析結果はありません。</p>
+          )}
+        </section>
+      </div>
     </main>
     <AlertDialog open={pendingDelete != null} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>
       <AlertDialogContent>

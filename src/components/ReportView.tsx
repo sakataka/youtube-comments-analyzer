@@ -18,6 +18,7 @@ import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AppHeader } from "./AppHeader";
 import { SectionHeading } from "./SectionHeading";
+import { SectionMarker } from "./SectionMarker";
 
 type Props = {
   run: RunState;
@@ -124,29 +125,38 @@ function Overview(props: Props) {
   return (
     <div className="report-grid">
       <div className="report-main">
-        <section className="report-section sentiment-overview" aria-labelledby="reception-title">
-          <SectionHeading id="reception-title" title="この動画はどう受け取られた？" description="ルールとローカルモデルで判定し、反語や不一致などの難しいコメントだけをAIで補助します。" aside={<span>{formatNumber(report.sentiment.overall.total)}件を分析</span>} />
-          <SentimentBar distribution={report.sentiment.overall} large onSelect={openSentimentComments} />
-          <SentimentMethodSummary report={report} />
+        <section className="report-section report-section--indexed sentiment-overview" aria-labelledby="reception-title">
+          <SectionMarker index="01" />
+          <div className="report-section__content">
+            <SectionHeading id="reception-title" title="この動画はどう受け取られた？" description="ルールとローカルモデルで判定し、反語や不一致などの難しいコメントだけをAIで補助します。" aside={<span>{formatNumber(report.sentiment.overall.total)}件を分析</span>} />
+            <SentimentBar distribution={report.sentiment.overall} large onSelect={openSentimentComments} />
+            <SentimentMethodSummary report={report} />
+          </div>
         </section>
 
-        <section className="report-section" aria-labelledby="people-title">
-          <SectionHeading id="people-title" title="よく語られた人物" description="言及量と、その人物について語られた感情を並べています。" aside={<Button className="inline-link" variant="link" type="button" onClick={() => props.setView("people")}>すべての人物</Button>} />
-          <PersonTable rows={ranking} onSelect={(id) => { props.setSelectedPersonId(id); props.setView("people"); }} />
+        <section className="report-section report-section--indexed" aria-labelledby="people-title">
+          <SectionMarker index="02" />
+          <div className="report-section__content">
+            <SectionHeading id="people-title" title="よく語られた人物" description="言及量と、その人物について語られた感情を並べています。" aside={<Button className="inline-link" variant="link" type="button" onClick={() => props.setView("people")}>すべての人物</Button>} />
+            <PersonTable rows={ranking} onSelect={(id) => { props.setSelectedPersonId(id); props.setView("people"); }} />
+          </div>
         </section>
 
-        <section className="report-section" aria-labelledby="topic-title">
-          <SectionHeading id="topic-title" title="主な話題" description={report.topics.note} aside={<Button className="inline-link" variant="link" type="button" onClick={() => props.setView("topics")}>すべての話題</Button>} />
-          <div className="topic-list topic-list--compact">
-            {topics.map((topic) => (
-              <article className="topic-row" key={topic.cluster_id}>
-                <div>
-                  <h3>{topic.label}</h3>
-                  <span>{formatNumber(topic.comment_count)}件</span>
-                </div>
-                <p>{topic.representative_comments[0]?.text_original || topic.summary}</p>
-              </article>
-            ))}
+        <section className="report-section report-section--indexed" aria-labelledby="topic-title">
+          <SectionMarker index="03" />
+          <div className="report-section__content">
+            <SectionHeading id="topic-title" title="主な話題" description={report.topics.note} aside={<Button className="inline-link" variant="link" type="button" onClick={() => props.setView("topics")}>すべての話題</Button>} />
+            <div className="topic-list topic-list--compact">
+              {topics.map((topic) => (
+                <article className="topic-row" key={topic.cluster_id}>
+                  <div>
+                    <h3>{topic.label}</h3>
+                    <span>{formatNumber(topic.comment_count)}件</span>
+                  </div>
+                  <p>{topic.representative_comments[0]?.text_original || topic.summary}</p>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -154,25 +164,28 @@ function Overview(props: Props) {
       </div>
 
       <aside className="insight-rail" aria-label="分析の補足">
-        <section>
-          <h2>分析上の注意</h2>
-          <dl>
-            <div><dt>取得範囲</dt><dd>{formatNumber(report.fetch_summary.max_comments_fetched)}件</dd></div>
-            <div><dt>YouTube表示</dt><dd>{formatNumber(report.video.youtube_comment_count)}件</dd></div>
-            <div><dt>AI感情補助</dt><dd>{aiStatusLabel(report.sentiment.ai_status)}</dd></div>
-            <div><dt>ローカルモデル</dt><dd>{localModelStatusLabel(report.sentiment.local_model?.status)}</dd></div>
-            <div><dt>AI送信</dt><dd>{formatNumber(report.sentiment.ai_summary?.assisted_comment_count ?? 0)}コメント</dd></div>
-          </dl>
-          {report.sentiment.local_model?.model_id ? <p className="model-identity">{report.sentiment.local_model.model_id}<br /><code>{report.sentiment.local_model.revision}</code></p> : null}
-          <p>{report.fetch_summary.coverage.message}</p>
+        <section className="insight-rail__section insight-rail__section--indexed">
+          <SectionMarker index="04" />
+          <div className="insight-rail__content">
+            <h2>分析上の注意</h2>
+            <dl>
+              <div><dt>取得範囲</dt><dd>{formatNumber(report.fetch_summary.max_comments_fetched)}件</dd></div>
+              <div><dt>YouTube表示</dt><dd>{formatNumber(report.video.youtube_comment_count)}件</dd></div>
+              <div><dt>AI感情補助</dt><dd>{aiStatusLabel(report.sentiment.ai_status)}</dd></div>
+              <div><dt>ローカルモデル</dt><dd>{localModelStatusLabel(report.sentiment.local_model?.status)}</dd></div>
+              <div><dt>AI送信</dt><dd>{formatNumber(report.sentiment.ai_summary?.assisted_comment_count ?? 0)}コメント</dd></div>
+            </dl>
+            {report.sentiment.local_model?.model_id ? <p className="model-identity">{report.sentiment.local_model.model_id}<br /><code>{report.sentiment.local_model.revision}</code></p> : null}
+            <p>{report.fetch_summary.coverage.message}</p>
+          </div>
         </section>
-        <section>
+        <section className="insight-rail__section">
           <h2>レビューセンター</h2>
           <strong className="rail-count">{report.review.pending_item_count}件</strong>
           <p>人物候補や感情の判断が曖昧な項目だけを確認できます。</p>
           <Button className="inline-link" variant="link" type="button" data-dialog-trigger="review" onClick={props.onOpenReview}>レビューを開く</Button>
         </section>
-        <section>
+        <section className="insight-rail__section">
           <h2>AIによる受け取られ方の分析</h2>
           <p>{props.aiInsight?.summary ? "コメント全体の反応を一枚のボードに整理しています。" : "感情・話題・人物・時系列を横断して読み解きます。"}</p>
           <Button className="inline-link" variant="link" type="button" disabled={props.aiBusy} onClick={props.onRunAi}>
