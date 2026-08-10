@@ -205,10 +205,6 @@ def integrate_sentiment(
     }
 
 
-def target_scope(text: str, aliases: list[str]) -> str:
-    return target_scope_details(text, aliases)[0]
-
-
 def target_scope_details(text: str, aliases: list[str]) -> tuple[str, str]:
     if not aliases:
         return text, "full"

@@ -39,6 +39,28 @@ test("最近の分析を個別削除・一括削除できる", async ({ page }, 
   await expect(page.getByText("まだ分析結果はありません。")).toBeVisible();
 });
 
+test("人物候補の修正は再集計済みレポートを同じレスポンスで返す", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "候補修正APIの統合確認はdesktopで代表実行する");
+  await page.request.post("/api/data/actions", { data: { action: "delete_all_runs" } });
+  const runId = await createFixtureRun(page);
+  const candidatesResponse = await page.request.get(`/api/runs/${runId}/candidates`);
+  const candidates = await candidatesResponse.json() as { persons: Array<{ person_id: string }> };
+  const personId = candidates.persons[0]?.person_id;
+  expect(personId).toBeTruthy();
+
+  const response = await page.request.post(`/api/runs/${runId}/candidate-actions`, {
+    data: { actions: [{ type: "accept_person", person_id: personId }] }
+  });
+  expect(response.ok()).toBe(true);
+  const result = await response.json() as {
+    candidates: { run_id: string; persons: Array<{ person_id: string; status: string }> };
+    report: { schema_version: string; run_id: string };
+  };
+  expect(result.candidates.run_id).toBe(runId);
+  expect(result.candidates.persons.find((person) => person.person_id === personId)?.status).toBe("accepted");
+  expect(result.report).toMatchObject({ schema_version: "report.v2", run_id: runId });
+});
+
 test("暫定レポートから人物・コメントの根拠へ移動できる", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "YouTubeコメントを分析" })).toBeVisible();
@@ -104,7 +126,7 @@ test("暫定レポートから人物・コメントの根拠へ移動できる",
   expect(theme.dark).toBe(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches));
 });
 
-async function createFixtureRun(page: Page) {
+async function createFixtureRun(page: Page): Promise<string> {
   const createdResponse = await page.request.post("/api/runs", {
     data: {
       url: "https://www.youtube.com/watch?v=vlpLbiqNhLo",
@@ -116,11 +138,15 @@ async function createFixtureRun(page: Page) {
   });
   expect(createdResponse.ok()).toBe(true);
   const created = await createdResponse.json() as { job_id: string };
+  let runId = "";
   await expect.poll(async () => {
     const response = await page.request.get(`/api/jobs/${created.job_id}`);
-    const job = await response.json() as { status: string };
+    const job = await response.json() as { status: string; run_id?: string };
+    runId = job.run_id ?? runId;
     return job.status;
   }, { timeout: 30_000 }).toBe("completed");
+  expect(runId).not.toBe("");
+  return runId;
 }
 
 test("三段階再判定と人の修正がコメント詳細へ反映される", async ({ page }, testInfo) => {

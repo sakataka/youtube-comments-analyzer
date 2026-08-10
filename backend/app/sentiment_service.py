@@ -99,6 +99,8 @@ class SentimentReanalysisService:
             status=aggregate["status"],
         )
         self.store._write_run_artifact(run_id, "llm_assist.json", aggregate)
+        report = self.store.build_report(run_id)
+        self.store.persist_report(run_id, report)
         notify("sentiment_completed", 1.0)
         return report
 

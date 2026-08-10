@@ -173,7 +173,7 @@ export type SentimentReviewItem = {
   evidence: SentimentEvidence;
 };
 
-export type SentimentEvidence = {
+type SentimentEvidence = {
   schema_version?: string;
   rule?: {
     label?: SentimentLabel;
@@ -267,7 +267,7 @@ export type Report = {
   evidence: { comments_endpoint: string; comment_count: number };
 };
 
-export type ReportComment = {
+type ReportComment = {
   comment_id: string;
   text_original: string;
   like_count: number;

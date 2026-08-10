@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import tempfile
 import threading
 import time
@@ -28,6 +27,20 @@ class PipelineTest(unittest.TestCase):
         store = AnalysisStore(db_path, data_dir)
         self.addCleanup(store.close)
         return store
+
+    def fixture_run(self, data_dir: Path, max_comments: int = 20) -> tuple[AnalysisStore, str, dict]:
+        client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
+        with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
+            bundle = client.fetch_video_bundle(
+                "https://www.youtube.com/watch?v=vlpLbiqNhLo",
+                FetchConfig(max_comments=max_comments, fetch_order="relevance", reply_fetch_mode="none"),
+            )
+        store = self.store(data_dir / "app.sqlite3", data_dir)
+        run_id = store.create_run(
+            bundle,
+            {"max_comments": max_comments, "reply_fetch_mode": "none", "fetch_order": "relevance"},
+        )
+        return store, run_id, bundle
 
     def test_sentiment_rules_handle_negation_mixed_and_target_scope(self):
         self.assertEqual(classify_sentiment("可愛くない")["label"], "negative")
@@ -309,25 +322,8 @@ class PipelineTest(unittest.TestCase):
     def test_fixture_to_report_without_api_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
-                bundle = client.fetch_video_bundle(
-                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                    FetchConfig(max_comments=1000, fetch_order="relevance", reply_fetch_mode="none"),
-                )
+            store, run_id, bundle = self.fixture_run(data_dir, max_comments=1000)
             self.assertEqual(bundle["fetch_summary"]["source"], "fixture")
-            store = self.store(data_dir / "app.sqlite3", data_dir)
-            run_id = store.create_run(
-                bundle,
-                {
-                    "max_comments": 1000,
-                    "cluster_count": 8,
-                    "reply_fetch_mode": "none",
-                    "fetch_order": "relevance",
-                    "use_llm": False,
-                    "use_embeddings": False,
-                },
-            )
             candidates = store.get_candidates(run_id)
             self.assertGreater(len(candidates["persons"]), 0)
             by_name = {person["display_name"]: person for person in candidates["persons"]}
@@ -437,7 +433,7 @@ class PipelineTest(unittest.TestCase):
             self.assertTrue(all(comment["sentiment_label"] == target_sentiment for comment in combined_page["comments"]))
             search_page = store.get_comments_page(run_id, limit=10, offset=0, search=target_comment["text_original"][:4])
             self.assertGreater(search_page["total"], 0)
-            updated_report = store.apply_comment_actions(
+            store.apply_comment_actions(
                 run_id,
                 [
                     {
@@ -455,8 +451,10 @@ class PipelineTest(unittest.TestCase):
             self.assertTrue((data_dir / "runs" / run_id / "aliases.json").exists())
             self.assertTrue((data_dir / "runs" / run_id / "clusters.json").exists())
             self.assertTrue((data_dir / "runs" / run_id / "appeal_labels.json").exists())
-            self.assertGreater(store.conn.execute("select count(*) from appeal_labels where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
-            self.assertGreater(store.conn.execute("select count(*) from clusters where analysis_run_id = ?", (run_id,)).fetchone()[0], 0)
+            self.assertEqual(store.conn.execute("select count(*) from reports where analysis_run_id = ?", (run_id,)).fetchone()[0], 1)
+            tables = {row[0] for row in store.conn.execute("select name from sqlite_master where type = 'table'")}
+            self.assertNotIn("appeal_labels", tables)
+            self.assertNotIn("clusters", tables)
             exported = store.export_run(run_id)
             self.assertEqual(exported["schema_version"], "run_export.v1")
             self.assertIn("report.json", exported["artifacts"])
@@ -525,17 +523,7 @@ class PipelineTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
-                bundle = client.fetch_video_bundle(
-                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-                )
-            store = self.store(data_dir / "app.sqlite3", data_dir)
-            run_id = store.create_run(
-                bundle,
-                {"max_comments": 20, "reply_fetch_mode": "none", "fetch_order": "relevance"},
-            )
+            store, run_id, _bundle = self.fixture_run(data_dir)
             before = {
                 row["id"]: row["text_original"]
                 for row in store.comments_for_snapshot(store.get_run_row(run_id)["comment_snapshot_id"])
@@ -608,6 +596,7 @@ class PipelineTest(unittest.TestCase):
             ai_report = service.reanalyze(run_id, include_ai=True, client=fake_llm)
             self.assertGreater(ai_report["sentiment"]["method_counts"]["ai"], 0)
             self.assertEqual(ai_report["sentiment"]["ai_status"], "available")
+            self.assertEqual(store.get_latest_report(run_id)["llm_assist"]["status"], "completed")
             self.assertTrue(fake_llm.prompts)
             self.assertNotIn("author_display_name", fake_llm.prompts[0])
 
@@ -621,6 +610,7 @@ class PipelineTest(unittest.TestCase):
             failed_report = service.reanalyze(run_id, include_ai=True, client=FailingLlm())
             self.assertEqual(failed_report["sentiment"]["local_model"]["status"], "available")
             self.assertEqual(failed_report["sentiment"]["ai_status"], "failed")
+            self.assertEqual(store.get_latest_report(run_id)["llm_assist"]["status"], "failed")
             self.assertTrue(any("ai_failed" in item["review_reasons"] for item in failed_report["sentiment"]["review_items"]))
 
             review_item = report["sentiment"]["review_items"][0]
@@ -983,25 +973,7 @@ class PipelineTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
-                bundle = client.fetch_video_bundle(
-                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-                )
-            store = self.store(data_dir / "app.sqlite3", data_dir)
-            run_id = store.create_run(
-                bundle,
-                {
-                    "max_comments": 20,
-                    "reply_fetch_mode": "none",
-                    "fetch_order": "relevance",
-                    "use_llm": False,
-                    "use_embeddings": False,
-                },
-            )
-            store.classify_and_report(run_id)
-            base_report = store.build_report(run_id)
+            store, run_id, _bundle = self.fixture_run(data_dir)
             first_comment = store.get_comments_page(run_id, limit=1, offset=0)["comments"][0]
             fake = FakeLlmClient(first_comment["comment_id"])
             result = store.run_llm_assist(run_id, client=fake)
@@ -1057,24 +1029,7 @@ class PipelineTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
-                bundle = client.fetch_video_bundle(
-                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-                )
-            store = self.store(data_dir / "app.sqlite3", data_dir)
-            run_id = store.create_run(
-                bundle,
-                {
-                    "max_comments": 20,
-                    "reply_fetch_mode": "none",
-                    "fetch_order": "relevance",
-                    "use_llm": False,
-                    "use_embeddings": False,
-                },
-            )
-            store.classify_and_report(run_id)
+            store, run_id, _bundle = self.fixture_run(data_dir)
             fake = FakeInsightClient()
             result = store.run_ai_insight(run_id, client=fake)
             cached = store.run_ai_insight(run_id, client=fake)
@@ -1114,24 +1069,7 @@ class PipelineTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            client = YouTubeCommentClient(data_dir, ROOT / "fixtures" / "sample_comments_drawme.jsonl")
-            with patch.dict("os.environ", {"YOUTUBE_FIXTURE_FALLBACK": "1"}, clear=False):
-                bundle = client.fetch_video_bundle(
-                    "https://www.youtube.com/watch?v=vlpLbiqNhLo",
-                    FetchConfig(max_comments=20, fetch_order="relevance", reply_fetch_mode="none"),
-                )
-            store = self.store(data_dir / "app.sqlite3", data_dir)
-            run_id = store.create_run(
-                bundle,
-                {
-                    "max_comments": 20,
-                    "reply_fetch_mode": "none",
-                    "fetch_order": "relevance",
-                    "use_llm": False,
-                    "use_embeddings": False,
-                },
-            )
-            store.classify_and_report(run_id)
+            store, run_id, _bundle = self.fixture_run(data_dir)
             result = store.run_llm_assist(run_id, client=FailingLlmClient())
             report = store.build_report(run_id)
 

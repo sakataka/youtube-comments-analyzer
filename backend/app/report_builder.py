@@ -278,7 +278,7 @@ def person_feature_words(comments: list[dict[str, Any]], excluded_terms: list[st
     excluded = {normalize_alias(term) for term in excluded_terms}
     for comment in comments:
         seen_in_comment: set[str] = set()
-        for token in extract_keyword_tokens(comment["text_original"]):
+        for token in keyword_tokens(comment["text_original"]):
             normalized = normalize_alias(token)
             if normalized in excluded:
                 continue
@@ -299,10 +299,6 @@ def person_feature_words(comments: list[dict[str, Any]], excluded_terms: list[st
         })
     rows.sort(key=lambda row: (row["score"], row["count"]), reverse=True)
     return rows[:12]
-
-
-def extract_keyword_tokens(text: str) -> list[str]:
-    return keyword_tokens(text)
 
 
 def build_cooccurrence(mentions: list[Any]) -> dict[str, Any]:
@@ -492,7 +488,7 @@ def top_cluster_keywords(comments: list[Any], seed_keywords: list[str]) -> list[
         if keyword and not is_noise_keyword(keyword):
             counts[keyword] += 1
     for comment in comments:
-        for token in extract_keyword_tokens(comment["text_original"]):
+        for token in keyword_tokens(comment["text_original"]):
             counts[token] += 1
     return [
         {"term": term, "count": count}

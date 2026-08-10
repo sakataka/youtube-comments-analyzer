@@ -62,7 +62,6 @@ YouTube 動画 URL を入力し、取得したコメントから人物・グル�
 - コメント一覧で本文検索、人物フィルタ、未紐づけ確認を行う
 - コメント一覧から人物紐づけの追加・解除を行い、ランキングに反映する
 - `report.v2` JSON を生成し、コメント本文はページング API から取得する
-- `appeal_labels` と `clusters` を DB に保存する
 - `normalized_comments.jsonl`、`aliases.json`、`clusters.json`、`appeal_labels.json` を run artifact として出力する
 
 ## 必要環境
@@ -236,7 +235,6 @@ AI インサイトは分析確定後の任意実行です。個別コメント�
 - `POST /api/runs/{run_id}/sentiment-actions`
 - `POST /api/runs/{run_id}/sentiment/reanalyze`
 - `GET /api/runs/{run_id}/sentiment-overrides/export`
-- `POST /api/runs/{run_id}/continue`
 - `POST /api/runs/{run_id}/review/complete`
 - `POST /api/runs/{run_id}/llm-assist`
 - `GET /api/runs/{run_id}/ai-insight`

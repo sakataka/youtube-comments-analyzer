@@ -106,7 +106,7 @@ export default function App() {
           force_refresh: forceRefresh
         })
       });
-      const completed = await waitForJob(created.job_id);
+      const completed = await waitForJob(created.job_id, setJob, "分析に失敗しました。");
       if (!completed.run_id) throw new Error("分析結果のIDを取得できませんでした。");
       await openRun(completed.run_id);
       if (import.meta.env.VITE_AUTO_AI_ASSIST !== "0") void reanalyzeSentiment(completed.run_id);
@@ -117,13 +117,14 @@ export default function App() {
     }
   }
 
-  async function waitForJob(jobId: string): Promise<RunJob> {
+  async function waitForJob(initial: string | RunJob, onChange: (job: RunJob) => void, failureMessage: string): Promise<RunJob> {
+    let nextJob = typeof initial === "string" ? await api<RunJob>(`/api/jobs/${initial}`) : initial;
     while (true) {
-      const nextJob = await api<RunJob>(`/api/jobs/${jobId}`);
-      setJob(nextJob);
+      onChange(nextJob);
       if (nextJob.status === "completed") return nextJob;
-      if (nextJob.status === "failed") throw new Error(nextJob.error_message || "分析に失敗しました。");
+      if (nextJob.status === "failed") throw new Error(nextJob.error_message || failureMessage);
       await new Promise((resolve) => window.setTimeout(resolve, 600));
+      nextJob = await api<RunJob>(`/api/jobs/${nextJob.job_id}`);
     }
   }
 
@@ -143,11 +144,7 @@ export default function App() {
       setReport(nextReport);
       setAiInsight(nextInsight);
       setSelectedPersonId(nextReport.rankings.mention_ranking[0]?.person_id ?? null);
-      setCommentSearch("");
-      setCommentPersonFilter("all");
-      setCommentSentimentFilter("all");
-      setCommentSort("likes");
-      setCommentPage(0);
+      resetCommentFilters();
       setView("overview");
       setJob(null);
       setSentimentJob(null);
@@ -170,7 +167,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ include_ai: true })
       });
-      const completed = await waitForSentimentJob(created);
+      const completed = await waitForJob(created, setSentimentJob, "感情の再判定に失敗しました。");
       if (completed.status !== "completed") return;
       const nextReport = await api<Report>(`/api/runs/${runId}/report`);
       setReport((current) => (current?.run_id === runId ? nextReport : current));
@@ -180,17 +177,6 @@ export default function App() {
       setNotice(nextReport.sentiment.local_model?.status === "failed" ? "ローカルモデルを利用できなかったため、ルール結果へ縮退しました。" : nextReport.sentiment.ai_status === "failed" ? "AI補助に失敗した項目は判断保留としてレビューへ残しました。" : "三段階の感情判定を反映しました。");
     } catch (caught) {
       setNotice(`感情の再判定を完了できませんでした。現在の結果は保持されています。${errorMessage(caught)}`);
-    }
-  }
-
-  async function waitForSentimentJob(initial: RunJob): Promise<RunJob> {
-    let nextJob = initial;
-    while (true) {
-      setSentimentJob(nextJob);
-      if (nextJob.status === "completed") return nextJob;
-      if (nextJob.status === "failed") throw new Error(nextJob.error_message || "感情の再判定に失敗しました。");
-      await new Promise((resolve) => window.setTimeout(resolve, 600));
-      nextJob = await api<RunJob>(`/api/jobs/${nextJob.job_id}`);
     }
   }
 
@@ -213,14 +199,12 @@ export default function App() {
     if (!run) return;
     setBusy(true);
     try {
-      await api(`/api/runs/${run.run_id}/candidate-actions`, { method: "POST", body: JSON.stringify({ actions: [action] }) });
-      await api(`/api/runs/${run.run_id}/continue`, { method: "POST" });
-      const [nextCandidates, nextReport] = await Promise.all([
-        api<CandidatesResponse>(`/api/runs/${run.run_id}/candidates`),
-        api<Report>(`/api/runs/${run.run_id}/report`)
-      ]);
-      setCandidates(nextCandidates);
-      setReport(nextReport);
+      const result = await api<{ candidates: CandidatesResponse; report: Report }>(`/api/runs/${run.run_id}/candidate-actions`, {
+        method: "POST",
+        body: JSON.stringify({ actions: [action] })
+      });
+      setCandidates(result.candidates);
+      setReport(result.report);
       setNotice("人物候補を反映してレポートを再集計しました。");
       void reanalyzeSentiment(run.run_id);
     } catch (caught) {
@@ -329,11 +313,7 @@ export default function App() {
     setCommentsPage(null);
     setAiInsight(null);
     setSentimentJob(null);
-    setCommentSearch("");
-    setCommentPersonFilter("all");
-    setCommentSentimentFilter("all");
-    setCommentSort("likes");
-    setCommentPage(0);
+    resetCommentFilters();
     setReplyMode("full");
     setNotice(null);
     setError(null);
@@ -343,6 +323,14 @@ export default function App() {
       top: 0,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
     });
+  }
+
+  function resetCommentFilters() {
+    setCommentSearch("");
+    setCommentPersonFilter("all");
+    setCommentSentimentFilter("all");
+    setCommentSort("likes");
+    setCommentPage(0);
   }
 
   return (

@@ -6,16 +6,16 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .pipeline import AnalysisStore
 from .local_sentiment import FakeLocalSentimentClassifier, LocalSentimentClassifier
 from .sentiment_service import SentimentReanalysisService
-from .youtube import FetchConfig, YouTubeCommentClient, parse_youtube_video_id
+from .youtube import FetchConfig, YouTubeCommentClient
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -32,6 +32,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(KeyError)
+async def not_found(_request: Request, exc: KeyError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
 
 store = AnalysisStore(DB_PATH, DATA_DIR)
 youtube_client = YouTubeCommentClient(DATA_DIR, FIXTURE_PATH)
@@ -101,11 +107,8 @@ def data_summary() -> dict[str, Any]:
     youtube_cache = DATA_DIR / "youtube_cache"
     runs = DATA_DIR / "runs"
     return {
-        "data_dir": str(DATA_DIR),
-        "database_bytes": file_size(DB_PATH),
         "youtube_cache": directory_summary(youtube_cache),
         "runs": directory_summary(runs),
-        "archive": directory_summary(DATA_DIR / "archive"),
         "total_bytes": directory_size(DATA_DIR),
         "run_count": store.count_runs(),
     }
@@ -113,45 +116,36 @@ def data_summary() -> dict[str, Any]:
 
 @app.post("/api/data/actions")
 def data_actions(request: DataActionRequest) -> dict[str, Any]:
-    try:
-        if request.action == "archive_run":
-            if not request.run_id:
-                raise HTTPException(status_code=400, detail="run_id is required")
-            return store.archive_run(request.run_id)
-        if request.action == "delete_run":
-            if not request.run_id:
-                raise HTTPException(status_code=400, detail="run_id is required")
-            return store.delete_run(request.run_id)
-        if request.action == "delete_all_runs":
-            return store.delete_all_runs()
-        if request.action == "archive_youtube_cache":
-            return store.archive_youtube_cache()
-        if request.action == "delete_youtube_cache":
-            return store.delete_youtube_cache()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if request.action == "archive_run":
+        if not request.run_id:
+            raise HTTPException(status_code=400, detail="run_id is required")
+        return store.archive_run(request.run_id)
+    if request.action == "delete_run":
+        if not request.run_id:
+            raise HTTPException(status_code=400, detail="run_id is required")
+        return store.delete_run(request.run_id)
+    if request.action == "delete_all_runs":
+        return store.delete_all_runs()
+    if request.action == "archive_youtube_cache":
+        return store.archive_youtube_cache()
+    if request.action == "delete_youtube_cache":
+        return store.delete_youtube_cache()
     raise HTTPException(status_code=400, detail=f"unknown action: {request.action}")
 
 
 @app.get("/api/runs/{run_id}/export")
 def export_run(run_id: str) -> dict[str, Any]:
-    try:
-        return store.export_run(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.export_run(run_id)
 
 
 @app.get("/api/runs/{run_id}/sentiment-overrides/export", response_class=PlainTextResponse)
 def export_sentiment_overrides(run_id: str) -> PlainTextResponse:
-    try:
-        payload = store.export_sentiment_overrides_jsonl(run_id)
-        return PlainTextResponse(
-            payload,
-            media_type="application/x-ndjson",
-            headers={"Content-Disposition": f'attachment; filename="{run_id}-sentiment-overrides.jsonl"'},
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    payload = store.export_sentiment_overrides_jsonl(run_id)
+    return PlainTextResponse(
+        payload,
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{run_id}-sentiment-overrides.jsonl"'},
+    )
 
 
 @app.post("/api/videos/inspect")
@@ -174,10 +168,7 @@ def create_run(request: RunCreateRequest) -> dict[str, str]:
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
-    try:
-        return store.get_job(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.get_job(job_id)
 
 
 def process_run_job(job_id: str, request: RunCreateRequest) -> None:
@@ -210,61 +201,44 @@ def list_runs() -> dict[str, Any]:
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
-    try:
-        return store.get_run(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.get_run(run_id)
 
 
 @app.get("/api/runs/{run_id}/candidates")
 def get_candidates(run_id: str) -> dict[str, Any]:
-    try:
-        return store.get_candidates(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.get_candidates(run_id)
 
 
 @app.post("/api/runs/{run_id}/candidate-actions")
-def candidate_actions(run_id: str, request: CandidateActionsRequest) -> dict[str, str]:
-    try:
-        store.get_run_row(run_id)
-        store.apply_candidate_actions(run_id, request.actions)
-        return {"status": "ok"}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def candidate_actions(run_id: str, request: CandidateActionsRequest) -> dict[str, Any]:
+    store.get_run_row(run_id)
+    store.apply_candidate_actions(run_id, request.actions)
+    report = store.classify_and_report(run_id)
+    return {"candidates": {"run_id": run_id, "persons": report["persons"]}, "report": report}
 
 
 @app.post("/api/runs/{run_id}/comment-actions")
 def comment_actions(run_id: str, request: CommentActionsRequest) -> dict[str, Any]:
-    try:
-        return store.apply_comment_actions(run_id, request.actions)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.apply_comment_actions(run_id, request.actions)
 
 
 @app.post("/api/runs/{run_id}/sentiment-actions")
 def sentiment_actions(run_id: str, request: SentimentActionsRequest) -> dict[str, Any]:
-    try:
-        return store.apply_sentiment_actions(run_id, request.actions)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.apply_sentiment_actions(run_id, request.actions)
 
 
 @app.post("/api/runs/{run_id}/sentiment/reanalyze")
 def reanalyze_sentiment(run_id: str, request: SentimentReanalyzeRequest) -> dict[str, Any]:
-    try:
-        store.get_run_row(run_id)
-        active = store.find_active_sentiment_job(run_id)
-        if active:
-            return active
-        job_id = f"job_{uuid.uuid4().hex[:12]}"
-        store.create_job(job_id, store.active_job_count() + 1)
-        store.update_job(job_id, stage="sentiment_queued", run_id=run_id)
-        include_ai = request.include_ai and os.getenv("SENTIMENT_AI_ENABLED", "1") != "0"
-        job_executor.submit(process_sentiment_job, job_id, run_id, include_ai)
-        return store.get_job(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    store.get_run_row(run_id)
+    active = store.find_active_sentiment_job(run_id)
+    if active:
+        return active
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    store.create_job(job_id, store.active_job_count() + 1)
+    store.update_job(job_id, stage="sentiment_queued", run_id=run_id)
+    include_ai = request.include_ai and os.getenv("SENTIMENT_AI_ENABLED", "1") != "0"
+    job_executor.submit(process_sentiment_job, job_id, run_id, include_ai)
+    return store.get_job(job_id)
 
 
 def process_sentiment_job(job_id: str, run_id: str, include_ai: bool) -> None:
@@ -287,21 +261,9 @@ def process_sentiment_job(job_id: str, run_id: str, include_ai: bool) -> None:
         )
 
 
-@app.post("/api/runs/{run_id}/continue")
-def continue_run(run_id: str) -> dict[str, Any]:
-    try:
-        store.classify_and_report(run_id)
-        return store.get_run(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @app.post("/api/runs/{run_id}/review/complete")
 def complete_review(run_id: str) -> dict[str, Any]:
-    try:
-        return store.verify_review(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.verify_review(run_id)
 
 
 @app.post("/api/runs/{run_id}/llm-assist")
@@ -309,8 +271,6 @@ def llm_assist(run_id: str) -> dict[str, Any]:
     try:
         store.get_run_row(run_id)
         return store.run_llm_assist(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=f"Codex App Server 取得に失敗しました: {exc}") from exc
     except ValueError as exc:
@@ -322,8 +282,6 @@ def ai_insight(run_id: str) -> dict[str, Any]:
     try:
         store.get_run_row(run_id)
         return store.run_ai_insight(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=f"Codex App Server 取得に失敗しました: {exc}") from exc
     except ValueError as exc:
@@ -332,22 +290,16 @@ def ai_insight(run_id: str) -> dict[str, Any]:
 
 @app.get("/api/runs/{run_id}/ai-insight")
 def get_ai_insight(run_id: str) -> dict[str, Any]:
-    try:
-        store.get_run_row(run_id)
-        insight = store.get_latest_ai_insight(run_id)
-        if not insight:
-            raise KeyError(f"ai insight not found: {run_id}")
-        return insight
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    store.get_run_row(run_id)
+    insight = store.get_latest_ai_insight(run_id)
+    if not insight:
+        raise KeyError(f"ai insight not found: {run_id}")
+    return insight
 
 
 @app.get("/api/runs/{run_id}/report")
 def get_report(run_id: str) -> dict[str, Any]:
-    try:
-        return store.get_latest_report(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return store.get_latest_report(run_id)
 
 
 @app.get("/api/runs/{run_id}/comments")
@@ -360,22 +312,15 @@ def get_comments(
     sentiment: Literal["positive", "neutral", "negative", "mixed", "unclear"] | None = Query(default=None),
     sort: Literal["source", "likes"] = Query(default="likes"),
 ) -> dict[str, Any]:
-    try:
-        return store.get_comments_page(
-            run_id,
-            limit=limit,
-            offset=offset,
-            person_id=person_id,
-            search=search,
-            sentiment=sentiment,
-            sort=sort,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-def file_size(path: Path) -> int:
-    return path.stat().st_size if path.exists() and path.is_file() else 0
+    return store.get_comments_page(
+        run_id,
+        limit=limit,
+        offset=offset,
+        person_id=person_id,
+        search=search,
+        sentiment=sentiment,
+        sort=sort,
+    )
 
 
 def directory_size(path: Path) -> int:

@@ -12,7 +12,7 @@ from typing import Any
 
 from .text import normalize_alias, normalize_text
 from .alias_suggestions import build_alias_suggestions
-from .candidate_extraction import build_candidate_seeds, extract_candidate_tokens
+from .candidate_extraction import build_candidate_seeds
 from .llm_assist import (
     AI_INSIGHT_OUTPUT_SCHEMA,
     CodexAppServerClient,
@@ -300,25 +300,8 @@ def init_db(conn: sqlite3.Connection) -> None:
           raw_text text,
           created_at text not null
         );
-        create table if not exists appeal_labels (
-          id text primary key,
-          analysis_run_id text not null,
-          person_id text not null,
-          category text not null,
-          label text not null,
-          count integer not null,
-          representative_comment_ids_json text not null
-        );
-        create table if not exists clusters (
-          id text primary key,
-          analysis_run_id text not null,
-          cluster_id text not null,
-          label text not null,
-          comment_count integer not null,
-          top_keywords_json text not null,
-          representative_comments_json text not null,
-          summary text not null
-        );
+        drop table if exists appeal_labels;
+        drop table if exists clusters;
         """
     )
     ensure_column(conn, "videos", "youtube_comment_count", "integer")
@@ -845,21 +828,15 @@ class AnalysisStore:
         self.apply_comment_mention_overrides(run_id)
         self.rebuild_sentiment_labels(run_id)
         report = self.build_report(run_id)
-        self.conn.execute(
-            "insert into reports values (?, ?, ?, ?)",
-            (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
-        )
-        self.save_report_sections(run_id, report)
+        self._save_report_row(run_id, report)
         self.conn.execute(
             "update analysis_runs set status = ?, stage = ?, progress = ?, completed_at = ? where id = ?",
             ("completed", "completed", 1.0, utc_now(), run_id),
         )
         self.conn.commit()
+        self._write_report_artifacts(run_id, report)
         self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
-        self._write_run_artifact(run_id, "report.json", report)
-        self._write_run_artifact(run_id, "aliases.json", self.get_candidates(run_id)["persons"])
-        self._write_run_artifact(run_id, "clusters.json", report["clusters"])
-        self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
+        self._write_run_artifact(run_id, "aliases.json", report["persons"])
         return report
 
     def apply_comment_actions(self, run_id: str, actions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -877,17 +854,11 @@ class AnalysisStore:
         self.apply_comment_mention_overrides(run_id)
         self.rebuild_sentiment_labels(run_id)
         report = self.build_report(run_id)
-        self.conn.execute(
-            "insert into reports values (?, ?, ?, ?)",
-            (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
-        )
-        self.save_report_sections(run_id, report)
+        self._save_report_row(run_id, report)
         self.conn.commit()
+        self._write_report_artifacts(run_id, report)
         self._write_run_artifact(run_id, "mentions.jsonl", self.get_mentions(run_id), jsonl=True)
-        self._write_run_artifact(run_id, "report.json", report)
-        self._write_run_artifact(run_id, "aliases.json", self.get_candidates(run_id)["persons"])
-        self._write_run_artifact(run_id, "clusters.json", report["clusters"])
-        self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
+        self._write_run_artifact(run_id, "aliases.json", report["persons"])
         return report
 
     def apply_comment_mention_overrides(self, run_id: str) -> None:
@@ -1114,16 +1085,12 @@ class AnalysisStore:
                 )
             self.apply_sentiment_overrides(run_id)
             report = self.build_report(run_id)
-            self.conn.execute(
-                "insert into reports values (?, ?, ?, ?)",
-                (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), now),
-            )
-            self.save_report_sections(run_id, report)
+            self._save_report_row(run_id, report)
             self.conn.commit()
         except Exception:
             self.conn.rollback()
             raise
-        self._write_run_artifact(run_id, "report.json", report)
+        self._write_report_artifacts(run_id, report)
         self._write_run_artifact(run_id, "sentiment_labels.jsonl", results, jsonl=True)
         return report
 
@@ -1349,15 +1316,6 @@ class AnalysisStore:
             ],
         }
 
-    def sentiment_ai_status(self, run_id: str) -> str:
-        rows = self.conn.execute(
-            "select method, evidence_json from sentiment_labels where analysis_run_id = ?",
-            (run_id,),
-        ).fetchall()
-        applied = any(row["method"] == "ai" for row in rows)
-        failed = any(json.loads(row["evidence_json"]).get("ai", {}).get("status") in {"failed", "unresolved"} for row in rows)
-        return "partial" if applied and failed else "available" if applied else "failed" if failed else "not_run"
-
     def build_report(self, run_id: str) -> dict[str, Any]:
         run = self.get_run_row(run_id)
         video = self.conn.execute("select * from videos where id = ?", (run["video_id"],)).fetchone()
@@ -1472,7 +1430,6 @@ class AnalysisStore:
         self.conn.commit()
 
     def run_ai_insight(self, run_id: str, client: LlmClient | None = None) -> dict[str, Any]:
-        self.get_latest_report(run_id)
         report = self.build_report(run_id)
         self.persist_report(run_id, report)
         prompt = build_ai_insight_prompt(report)
@@ -1703,15 +1660,7 @@ class AnalysisStore:
         ).fetchone()
         if not row:
             raise KeyError(f"report not found: {run_id}")
-        report = json.loads(row["report_json"])
-        latest_llm_assist = self.get_latest_llm_assist(run_id)
-        needs_v2 = report.get("schema_version") != "report.v2"
-        if needs_v2:
-            self.rebuild_sentiment_labels(run_id)
-        if needs_v2 or (latest_llm_assist and report.get("llm_assist") != latest_llm_assist):
-            report = self.build_report(run_id)
-            self.persist_report(run_id, report)
-        return report
+        return json.loads(row["report_json"])
 
     def verify_review(self, run_id: str) -> dict[str, Any]:
         self.get_run_row(run_id)
@@ -1855,12 +1804,18 @@ class AnalysisStore:
         }
 
     def persist_report(self, run_id: str, report: dict[str, Any]) -> None:
+        self._save_report_row(run_id, report)
+        self.conn.commit()
+        self._write_report_artifacts(run_id, report)
+
+    def _save_report_row(self, run_id: str, report: dict[str, Any]) -> None:
+        self.conn.execute("delete from reports where analysis_run_id = ?", (run_id,))
         self.conn.execute(
             "insert into reports values (?, ?, ?, ?)",
             (new_id("report"), run_id, json.dumps(report, ensure_ascii=False), utc_now()),
         )
-        self.save_report_sections(run_id, report)
-        self.conn.commit()
+
+    def _write_report_artifacts(self, run_id: str, report: dict[str, Any]) -> None:
         self._write_run_artifact(run_id, "report.json", report)
         self._write_run_artifact(run_id, "clusters.json", report["clusters"])
         self._write_run_artifact(run_id, "appeal_labels.json", report["appeal_summary"])
@@ -1997,8 +1952,6 @@ class AnalysisStore:
             "sentiment_overrides",
             "llm_assists",
             "ai_insights",
-            "appeal_labels",
-            "clusters",
             "aliases",
             "persons",
         ]:
@@ -2094,38 +2047,6 @@ class AnalysisStore:
     def get_mentions(self, run_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute("select * from comment_mentions where analysis_run_id = ?", (run_id,)).fetchall()
         return [dict(row) for row in rows]
-
-    def save_report_sections(self, run_id: str, report: dict[str, Any]) -> None:
-        self.conn.execute("delete from appeal_labels where analysis_run_id = ?", (run_id,))
-        self.conn.execute("delete from clusters where analysis_run_id = ?", (run_id,))
-        for person in report.get("appeal_summary", {}).get("people", []):
-            for label in person.get("category_counts", []):
-                self.conn.execute(
-                    "insert into appeal_labels values (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        new_id("appeal"),
-                        run_id,
-                        person["person_id"],
-                        label["category"],
-                        label["label"],
-                        int(label["count"]),
-                        json.dumps(label.get("representative_comment_ids") or [], ensure_ascii=False),
-                    ),
-                )
-        for cluster in report.get("clusters", {}).get("clusters", []):
-            self.conn.execute(
-                "insert into clusters values (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    new_id("cluster"),
-                    run_id,
-                    cluster["cluster_id"],
-                    cluster["label"],
-                    int(cluster["comment_count"]),
-                    json.dumps(cluster.get("top_keywords") or [], ensure_ascii=False),
-                    json.dumps(cluster.get("representative_comments") or [], ensure_ascii=False),
-                    cluster.get("summary") or "",
-                ),
-            )
 
     def _write_run_artifact(self, run_id: str, filename: str, payload: Any, jsonl: bool = False) -> None:
         run_dir = self.data_dir / "runs" / run_id

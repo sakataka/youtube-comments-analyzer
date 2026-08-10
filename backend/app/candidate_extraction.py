@@ -9,11 +9,6 @@ from .text import normalize_alias
 from .text_filters import honorific_person_alias_terms, is_noise_keyword, is_person_alias_like, person_alias_terms
 
 
-HONORIFIC_RE = re.compile(
-    r"([一-龥々]{2,6}|[一-龥々]{1,4}[ァ-ヶー]{2,8}|[ァ-ヶー]{3,16}|[ぁ-んー]{2,8}(?:ちゃむ|ちゃん|たん|りん|ぽん|ぴょん|みん|っち|ちん|きゅん|にゃん))(さん|ちゃん|くん|君|氏|様)"
-)
-KATAKANA_RE = re.compile(r"[ァ-ヶー]{3,16}")
-KANJI_KATAKANA_RE = re.compile(r"[一-龥々]{1,8}[ァ-ヶー]{2,12}")
 HASHTAG_RE = re.compile(r"#([一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24})")
 BRACKET_CONTENT_RE = re.compile(r"[【\[\(（]([^】\]\)）]{2,160})[】\]\)）]")
 METADATA_TOKEN_RE = re.compile(r"[一-龥々ぁ-んァ-ヶA-Za-z0-9_ー]{2,24}")
@@ -328,14 +323,6 @@ def is_generic_candidate(token: str) -> bool:
     if token in GENERIC_TOKEN_STOPWORDS or normalize_alias(token) in normalized_stopwords:
         return True
     return any(keyword in token for keyword in GENERIC_TOKEN_KEYWORDS)
-
-
-def looks_like_person_name(token: str) -> bool:
-    return bool(
-        re.fullmatch(r"[一-龥々]{2,5}", token)
-        or re.fullmatch(r"[ぁ-んァ-ヶー]{3,10}", token)
-        or re.fullmatch(r"[一-龥々]{1,4}[ァ-ヶー]{2,8}", token)
-    )
 
 
 def looks_like_sentence_fragment(token: str) -> bool:
