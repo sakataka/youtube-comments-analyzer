@@ -1,10 +1,10 @@
-fastapi>=0.139
-uvicorn[standard]>=0.51
+fastapi>=0.141.1
+uvicorn[standard]>=0.52.3
 pydantic>=2.13.4
 sudachipy>=0.6.11
-sudachidict-core>=20260428
+sudachidict-core>=20260723
 torch==2.13.0
-transformers==5.13.1
+transformers==5.15.0
 fugashi==1.5.2
 unidic-lite==1.0.8
 safetensors==0.8.0
