@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.1",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 0",
     "dev:e2e": "VITE_BACKEND_URL=http://127.0.0.1:8011 VITE_AUTO_AI_ASSIST=0 vite --host 127.0.0.1 --port 4175 --mode e2e",
