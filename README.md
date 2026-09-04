@@ -103,7 +103,7 @@ SENTIMENT_MODEL_DEVICE=auto
 SENTIMENT_MODEL_CACHE_DIR=
 ```
 
-`YOUTUBE_API_KEY` が空の場合、cache がある動画だけを再分析できます。未cacheの実動画は fixture で代用せず、設定エラーとして止めます。テスト用 fixture を明示的に使う場合だけ `YOUTUBE_FIXTURE_FALLBACK=1` を設定します。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。
+`YOUTUBE_API_KEY` が空の場合、cache がある動画だけを再分析できます。未cacheの実動画は fixture で代用せず、設定エラーとして止めます。テスト用 fixture を明示的に使う場合だけ `YOUTUBE_FIXTURE_FALLBACK=1` を設定します。`DATABASE_URL` と `DATA_DIR` が空の場合は、それぞれ `data/app.sqlite3` と `data/` を使います。LLM 補助分析は Codex app server 経由で実行するため、このアプリ専用の OpenAI API key は不要です。Codexのモデル・推論強度は全処理で `gpt-6-astra` / `medium` に固定しています。
 
 ローカル感情モデルは既定で有効です。モデルID、revision、閾値の既定値は `backend/app/sentiment_model_config.json` に固定され、環境変数は一時的な上書きにだけ使います。`SENTIMENT_MODEL_DEVICE=auto` はMPSを優先し、失敗時は同じrunをCPUで再実行します。モデルファイルは `data/model_cache/` に保存され、Gitには追加されません。
 
@@ -203,7 +203,7 @@ data/runs/<run_id>/
   ai_insight.json
 ```
 
-LLM 補助分析の結果は、prompt version と入力内容から作った hash で DB の `llm_cache` に保存します。同一入力では Codex app server を再呼び出さず、cache 結果を run artifact と DB に再保存します。
+LLM 補助分析の結果は、モデル・推論強度・prompt version と入力内容から作った hash で DB の `llm_cache` に保存します。同一入力では Codex app server を再呼び出さず、cache 結果を run artifact と DB に再保存します。
 Codex app server の受信は `turn/completed` だけに依存せず、`agentMessage` 完了イベントまたは thread idle でも完了として扱います。
 LLM 補助だけが失敗した場合も、候補抽出・alias・ランキングの通常レポートは有効なまま残し、`sections.llm_assist.status` に `failed` と理由を保存します。
 AI インサイトは分析確定後の任意実行です。個別コメント全文ではなく、言及ランキング、共起、クラスタ、魅力カテゴリ、品質確認件数などの集計済みサマリーだけを Codex app server に渡し、結果を `ai_insight.json` と DB に保存します。

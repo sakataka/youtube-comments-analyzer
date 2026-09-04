@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+CODEX_MODEL = "gpt-6-astra"
+CODEX_REASONING_EFFORT = "medium"
+
 PROMPT_VERSION = "2026-07-12.llm-assist-sentiment.v3"
 SENTIMENT_PROMPT_VERSION = "2026-07-12.sentiment-review.v1"
 INSIGHT_PROMPT_VERSION = "2026-07-12.audience-insight.v3"
@@ -91,11 +94,9 @@ class CodexAppServerClient:
         self,
         timeout_seconds: int = 180,
         *,
-        effort: str | None = None,
         output_schema: dict[str, Any] | None = None,
     ):
         self.timeout_seconds = timeout_seconds
-        self.effort = effort
         self.output_schema = output_schema
 
     def ask(self, prompt: str) -> str:
@@ -138,6 +139,7 @@ class CodexAppServerClient:
                     "method": "thread/start",
                     "id": 1,
                     "params": {
+                        "model": CODEX_MODEL,
                         "ephemeral": True,
                         "environments": [],
                         "developerInstructions": (
@@ -156,7 +158,8 @@ class CodexAppServerClient:
                     "params": {
                         "threadId": thread_id,
                         "input": [{"type": "text", "text": prompt}],
-                        **({"effort": self.effort} if self.effort else {}),
+                        "model": CODEX_MODEL,
+                        "effort": CODEX_REASONING_EFFORT,
                         **({"outputSchema": self.output_schema} if self.output_schema else {}),
                     },
                 },
@@ -274,15 +277,15 @@ def extract_completed_agent_text(item: dict[str, Any]) -> str:
 
 
 def llm_cache_key(prompt: str) -> str:
-    return hashlib.sha256(f"{PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{CODEX_MODEL}\n{CODEX_REASONING_EFFORT}\n{PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
 
 
 def sentiment_cache_key(prompt: str) -> str:
-    return hashlib.sha256(f"{SENTIMENT_PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{CODEX_MODEL}\n{CODEX_REASONING_EFFORT}\n{SENTIMENT_PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
 
 
 def ai_insight_cache_key(prompt: str) -> str:
-    return hashlib.sha256(f"{INSIGHT_PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{CODEX_MODEL}\n{CODEX_REASONING_EFFORT}\n{INSIGHT_PROMPT_VERSION}\n{prompt}".encode("utf-8")).hexdigest()
 
 
 def build_llm_assist_prompt(report: dict[str, Any]) -> str:

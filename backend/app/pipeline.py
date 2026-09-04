@@ -1359,7 +1359,7 @@ class AnalysisStore:
             self.persist_report(run_id, self.build_report(run_id))
             return result
 
-        active_client = client or CodexAppServerClient(effort="medium", output_schema=AI_INSIGHT_OUTPUT_SCHEMA)
+        active_client = client or CodexAppServerClient(output_schema=AI_INSIGHT_OUTPUT_SCHEMA)
         raw_text = None
         try:
             raw_text = active_client.ask(prompt)

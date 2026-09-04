@@ -179,7 +179,7 @@ class SentimentReanalysisService:
         review_items: list[dict[str, Any]],
         client: LlmClient | None,
     ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
-        active_client = client or CodexAppServerClient(effort="low", output_schema=SENTIMENT_OUTPUT_SCHEMA)
+        active_client = client or CodexAppServerClient(output_schema=SENTIMENT_OUTPUT_SCHEMA)
         comments: list[str] = []
         for item in review_items:
             if item["comment_id"] not in comments:
