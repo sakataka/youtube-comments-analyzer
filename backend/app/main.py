@@ -1,340 +1,193 @@
 from __future__ import annotations
 
 import os
-import uuid
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from fastapi import FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
-from .pipeline import AnalysisStore
-from .local_sentiment import FakeLocalSentimentClassifier, LocalSentimentClassifier
-from .sentiment_service import SentimentReanalysisService
-from .youtube import FetchConfig, YouTubeCommentClient
-
+from .codex_client import CODEX_MODEL, CODEX_REASONING_EFFORT
+from .opinion_analysis import Observation
+from .opinion_service import OpinionStore
+from .youtube import YouTubeCommentClient
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT_DIR / ".env")
-DATA_DIR = Path(os.getenv("DATA_DIR") or ROOT_DIR / "data")
-DB_PATH = Path(os.getenv("DATABASE_URL") or DATA_DIR / "app.sqlite3")
-FIXTURE_PATH = ROOT_DIR / "fixtures" / "sample_comments_drawme.jsonl"
+load_dotenv(ROOT_DIR / '.env')
+DATA_DIR = Path(os.getenv('DATA_DIR') or ROOT_DIR / 'data')
+DB_PATH = Path(os.getenv('DATABASE_URL') or DATA_DIR / 'app.sqlite3')
+opinion_store = OpinionStore(DB_PATH)
+youtube_client = YouTubeCommentClient(DATA_DIR, ROOT_DIR / 'fixtures' / 'sample_comments_drawme.jsonl')
+job_executor = ThreadPoolExecutor(max_workers=1)
+app = FastAPI(title='YouTube Comment Insights')
+app.add_middleware(CORSMiddleware, allow_origins=['http://127.0.0.1', 'http://localhost'], allow_origin_regex=r'http://127\.0\.0\.1:\d+|http://localhost:\d+', allow_methods=['*'], allow_headers=['*'])
 
-app = FastAPI(title="YouTube Comment Mention Analyzer")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1", "http://localhost"],
-    allow_origin_regex=r"http://127\.0\.0\.1:\d+|http://localhost:\d+",
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+class RequestModel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+
+class RunCreateRequest(RequestModel):
+    url: str = Field(min_length=1, max_length=4096)
+    max_comments: int = Field(default=5000, ge=1, le=5000)
+    reply_fetch_mode: Literal['none', 'full'] = 'full'
+    force_refresh: bool = False
+
+
+class OpinionAction(RequestModel):
+    action: Literal['continue', 'stop', 'resume']
+
+
+class TranscriptImport(RequestModel):
+    content: str = Field(min_length=1, max_length=5_000_000)
+
+
+class OpinionCorrection(RequestModel):
+    comment_id: str = ''
+    observations: list[Observation] | None = None
+    rename_from: str | None = Field(default=None, max_length=160)
+    rename_to: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class DataAction(RequestModel):
+    action: Literal['delete_run', 'delete_all_runs', 'archive_youtube_cache', 'delete_youtube_cache']
+    run_id: str | None = None
 
 
 @app.exception_handler(KeyError)
 async def not_found(_request: Request, exc: KeyError) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
+    return JSONResponse(status_code=404, content={'detail': str(exc)})
 
 
-store = AnalysisStore(DB_PATH, DATA_DIR)
-youtube_client = YouTubeCommentClient(DATA_DIR, FIXTURE_PATH)
-job_executor = ThreadPoolExecutor(max_workers=1)
-sentiment_classifier = FakeLocalSentimentClassifier() if os.getenv("SENTIMENT_FAKE_MODEL") == "1" else LocalSentimentClassifier()
-sentiment_service = SentimentReanalysisService(store, sentiment_classifier)
+@app.exception_handler(ValueError)
+async def bad_input(_request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={'detail': str(exc)})
 
 
-class InspectRequest(BaseModel):
-    url: str
-    fetch_metadata: bool = False
-
-
-class RunCreateRequest(BaseModel):
-    url: str
-    max_comments: int = Field(default=5000, ge=1, le=5000)
-    reply_fetch_mode: Literal["none", "inline_subset", "full"] = "full"
-    fetch_order: Literal["relevance", "time"] = "relevance"
-    force_refresh: bool = False
-
-
-class CandidateActionsRequest(BaseModel):
-    actions: list[dict[str, Any]]
-
-
-class CommentActionsRequest(BaseModel):
-    actions: list[dict[str, Any]]
-
-
-class SentimentActionsRequest(BaseModel):
-    actions: list[dict[str, Any]]
-
-
-class SentimentReanalyzeRequest(BaseModel):
-    include_ai: bool = True
-
-
-class DataActionRequest(BaseModel):
-    action: Literal["archive_run", "delete_run", "delete_all_runs", "archive_youtube_cache", "delete_youtube_cache"]
-    run_id: str | None = None
-
-
-@app.get("/api/health")
+@app.get('/api/health')
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {'status': 'ok', 'report_schema': 'report.v3'}
 
 
-@app.get("/api/settings")
+@app.get('/api/settings')
 def settings() -> dict[str, Any]:
-    return {
-        "youtube_api_key_configured": bool(os.getenv("YOUTUBE_API_KEY")),
-        "youtube_api_key_env_name": "YOUTUBE_API_KEY",
-        "data_dir": str(DATA_DIR),
-        "max_comments": {"default": 5000, "min": 1, "max": 5000},
-        "reply_fetch_modes": [
-            {"value": "none", "label": "トップレベルのみ", "uses_extra_quota": False},
-            {"value": "inline_subset", "label": "同梱返信だけ含める", "uses_extra_quota": False},
-            {"value": "full", "label": "返信を追加取得して含める", "uses_extra_quota": True},
-        ],
-        "llm_provider": "codex_app_server",
-        "local_sentiment": sentiment_classifier.status(),
-    }
-
-
-@app.get("/api/data/summary")
-def data_summary() -> dict[str, Any]:
-    youtube_cache = DATA_DIR / "youtube_cache"
-    runs = DATA_DIR / "runs"
-    return {
-        "youtube_cache": directory_summary(youtube_cache),
-        "runs": directory_summary(runs),
-        "total_bytes": directory_size(DATA_DIR),
-        "run_count": store.count_runs(),
-    }
-
-
-@app.post("/api/data/actions")
-def data_actions(request: DataActionRequest) -> dict[str, Any]:
-    if request.action == "archive_run":
-        if not request.run_id:
-            raise HTTPException(status_code=400, detail="run_id is required")
-        return store.archive_run(request.run_id)
-    if request.action == "delete_run":
-        if not request.run_id:
-            raise HTTPException(status_code=400, detail="run_id is required")
-        return store.delete_run(request.run_id)
-    if request.action == "delete_all_runs":
-        return store.delete_all_runs()
-    if request.action == "archive_youtube_cache":
-        return store.archive_youtube_cache()
-    if request.action == "delete_youtube_cache":
-        return store.delete_youtube_cache()
-    raise HTTPException(status_code=400, detail=f"unknown action: {request.action}")
-
-
-@app.get("/api/runs/{run_id}/export")
-def export_run(run_id: str) -> dict[str, Any]:
-    return store.export_run(run_id)
-
-
-@app.get("/api/runs/{run_id}/sentiment-overrides/export", response_class=PlainTextResponse)
-def export_sentiment_overrides(run_id: str) -> PlainTextResponse:
-    payload = store.export_sentiment_overrides_jsonl(run_id)
-    return PlainTextResponse(
-        payload,
-        media_type="application/x-ndjson",
-        headers={"Content-Disposition": f'attachment; filename="{run_id}-sentiment-overrides.jsonl"'},
-    )
-
-
-@app.post("/api/videos/inspect")
-def inspect_video(request: InspectRequest) -> dict[str, Any]:
-    try:
-        return youtube_client.inspect_video(request.url, request.fetch_metadata)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@app.post("/api/runs")
-def create_run(request: RunCreateRequest) -> dict[str, str]:
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    store.create_job(job_id, store.active_job_count() + 1)
-    job_executor.submit(process_run_job, job_id, request)
-    return {"job_id": job_id, "status": "queued"}
-
-
-@app.get("/api/jobs/{job_id}")
-def get_job(job_id: str) -> dict[str, Any]:
-    return store.get_job(job_id)
-
-
-def process_run_job(job_id: str, request: RunCreateRequest) -> None:
-    store.update_job(job_id, status="running", stage="fetching_comments", progress=0.15, queue_position=1)
-    try:
-        bundle = youtube_client.fetch_video_bundle(
-            request.url,
-            FetchConfig(
-                max_comments=request.max_comments,
-                fetch_order=request.fetch_order,
-                reply_fetch_mode=request.reply_fetch_mode,
-                force_refresh=request.force_refresh,
-            ),
-        )
-        store.update_job(job_id, stage="building_provisional_report", progress=0.55)
-        run_id = store.create_run(bundle, request.model_dump())
-        store.update_job(job_id, status="completed", stage="provisional_report_ready", progress=1.0, run_id=run_id)
-    except ValueError as exc:
-        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=str(exc))
-    except RuntimeError as exc:
-        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=f"YouTube API 取得に失敗しました: {exc}")
-    except Exception as exc:
-        store.update_job(job_id, status="failed", stage="failed", progress=1.0, error_message=f"分析 run の作成に失敗しました: {exc}")
-
-
-@app.get("/api/runs")
-def list_runs() -> dict[str, Any]:
-    return {"runs": store.list_runs()}
-
-
-@app.get("/api/runs/{run_id}")
-def get_run(run_id: str) -> dict[str, Any]:
-    return store.get_run(run_id)
-
-
-@app.get("/api/runs/{run_id}/candidates")
-def get_candidates(run_id: str) -> dict[str, Any]:
-    return store.get_candidates(run_id)
-
-
-@app.post("/api/runs/{run_id}/candidate-actions")
-def candidate_actions(run_id: str, request: CandidateActionsRequest) -> dict[str, Any]:
-    store.get_run_row(run_id)
-    store.apply_candidate_actions(run_id, request.actions)
-    report = store.classify_and_report(run_id)
-    return {"candidates": {"run_id": run_id, "persons": report["persons"]}, "report": report}
-
-
-@app.post("/api/runs/{run_id}/comment-actions")
-def comment_actions(run_id: str, request: CommentActionsRequest) -> dict[str, Any]:
-    return store.apply_comment_actions(run_id, request.actions)
-
-
-@app.post("/api/runs/{run_id}/sentiment-actions")
-def sentiment_actions(run_id: str, request: SentimentActionsRequest) -> dict[str, Any]:
-    return store.apply_sentiment_actions(run_id, request.actions)
-
-
-@app.post("/api/runs/{run_id}/sentiment/reanalyze")
-def reanalyze_sentiment(run_id: str, request: SentimentReanalyzeRequest) -> dict[str, Any]:
-    store.get_run_row(run_id)
-    active = store.find_active_sentiment_job(run_id)
-    if active:
-        return active
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    store.create_job(job_id, store.active_job_count() + 1)
-    store.update_job(job_id, stage="sentiment_queued", run_id=run_id)
-    include_ai = request.include_ai and os.getenv("SENTIMENT_AI_ENABLED", "1") != "0"
-    job_executor.submit(process_sentiment_job, job_id, run_id, include_ai)
-    return store.get_job(job_id)
-
-
-def process_sentiment_job(job_id: str, run_id: str, include_ai: bool) -> None:
-    store.update_job(job_id, status="running", stage="sentiment_preparing", progress=0.05, run_id=run_id, queue_position=1)
-
-    def progress(stage: str, value: float) -> None:
-        store.update_job(job_id, status="running", stage=stage, progress=value, run_id=run_id)
-
-    try:
-        sentiment_service.reanalyze(run_id, include_ai=include_ai, progress=progress)
-        store.update_job(job_id, status="completed", stage="sentiment_completed", progress=1.0, run_id=run_id)
-    except Exception as exc:
-        store.update_job(
-            job_id,
-            status="failed",
-            stage="sentiment_failed",
-            progress=1.0,
-            run_id=run_id,
-            error_message=f"感情の再判定に失敗しました: {exc}",
-        )
-
-
-@app.post("/api/runs/{run_id}/review/complete")
-def complete_review(run_id: str) -> dict[str, Any]:
-    return store.verify_review(run_id)
-
-
-@app.post("/api/runs/{run_id}/llm-assist")
-def llm_assist(run_id: str) -> dict[str, Any]:
-    try:
-        store.get_run_row(run_id)
-        return store.run_llm_assist(run_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"Codex App Server 取得に失敗しました: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"LLM 応答の解析に失敗しました: {exc}") from exc
-
-
-@app.post("/api/runs/{run_id}/ai-insight")
-def ai_insight(run_id: str) -> dict[str, Any]:
-    try:
-        store.get_run_row(run_id)
-        return store.run_ai_insight(run_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"Codex App Server 取得に失敗しました: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"AI インサイト応答の解析に失敗しました: {exc}") from exc
-
-
-@app.get("/api/runs/{run_id}/ai-insight")
-def get_ai_insight(run_id: str) -> dict[str, Any]:
-    store.get_run_row(run_id)
-    insight = store.get_latest_ai_insight(run_id)
-    if not insight:
-        raise KeyError(f"ai insight not found: {run_id}")
-    return insight
-
-
-@app.get("/api/runs/{run_id}/report")
-def get_report(run_id: str) -> dict[str, Any]:
-    return store.get_latest_report(run_id)
-
-
-@app.get("/api/runs/{run_id}/comments")
-def get_comments(
-    run_id: str,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    person_id: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    sentiment: Literal["positive", "neutral", "negative", "mixed", "unclear"] | None = Query(default=None),
-    sort: Literal["source", "likes"] = Query(default="likes"),
-) -> dict[str, Any]:
-    return store.get_comments_page(
-        run_id,
-        limit=limit,
-        offset=offset,
-        person_id=person_id,
-        search=search,
-        sentiment=sentiment,
-        sort=sort,
-    )
-
-
-def directory_size(path: Path) -> int:
-    if not path.exists():
-        return 0
-    return sum(file.stat().st_size for file in path.rglob("*") if file.is_file())
+    return {'youtube_api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')), 'youtube_api_key_env_name': 'YOUTUBE_API_KEY', 'max_comments': {'default': 5000, 'min': 1, 'max': 5000}, 'reply_fetch_modes': [{'value': 'none', 'label': '親コメントのみ', 'uses_extra_quota': False}, {'value': 'full', 'label': '返信を追加取得する', 'uses_extra_quota': True}], 'llm_provider': 'codex_app_server', 'model': CODEX_MODEL, 'effort': CODEX_REASONING_EFFORT}
 
 
 def directory_summary(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"path": str(path), "bytes": 0, "file_count": 0}
-    files = [file for file in path.rglob("*") if file.is_file()]
-    return {
-        "path": str(path),
-        "bytes": sum(file.stat().st_size for file in files),
-        "file_count": len(files),
-    }
+    files = [file for file in path.rglob('*') if file.is_file()] if path.exists() else []
+    return {'bytes': sum(file.stat().st_size for file in files), 'file_count': len(files)}
+
+
+@app.get('/api/data/summary')
+def data_summary() -> dict[str, Any]:
+    return {'youtube_cache': directory_summary(DATA_DIR / 'youtube_cache'), 'runs': {'bytes': DB_PATH.stat().st_size}, 'total_bytes': directory_summary(DATA_DIR)['bytes'], 'run_count': len(opinion_store.list_runs())}
+
+
+@app.post('/api/data/actions')
+def data_actions(request: DataAction) -> dict[str, Any]:
+    if request.action == 'delete_run':
+        if not request.run_id:
+            raise ValueError('run_idが必要です。')
+        return opinion_store.delete(request.run_id)
+    if request.action == 'delete_all_runs':
+        with opinion_store.lock:
+            runs = opinion_store.list_runs()
+            if any(run['status'] in ('running', 'queued') for run in runs):
+                raise ValueError('実行中の分析は停止してから削除してください。')
+            for run in runs:
+                opinion_store.delete(run['run_id'])
+        return {'status': 'deleted', 'deleted_count': len(runs)}
+    cache = DATA_DIR / 'youtube_cache'
+    if cache.exists():
+        if request.action == 'archive_youtube_cache':
+            from datetime import datetime
+            archive = DATA_DIR / 'archive' / f'youtube_cache_{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}'
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(cache), str(archive))
+        else:
+            shutil.rmtree(cache)
+    return {'status': 'completed'}
+
+
+def enqueue_opinion(run_id: str, action: str) -> dict[str, str]:
+    opinion_store.queue(run_id, action)
+    job_executor.submit(opinion_store.process, run_id, youtube_client, lambda *_: None)
+    return {'run_id': run_id, 'status': 'queued'}
+
+
+@app.post('/api/runs')
+def create_run(request: RunCreateRequest) -> dict[str, str]:
+    config = request.model_dump()
+    seed = None if request.force_refresh else opinion_store.latest_seed(request.url, request.reply_fetch_mode)
+    run_id = opinion_store.create(request.url, config, seed)
+    return enqueue_opinion(run_id, 'resume' if seed else 'fetch')
+
+
+@app.get('/api/runs')
+def list_runs() -> dict[str, Any]:
+    return {'runs': sorted(opinion_store.list_runs(), key=lambda run: run['created_at'], reverse=True)}
+
+
+@app.get('/api/runs/{run_id}')
+def get_run(run_id: str) -> dict[str, Any]:
+    return opinion_store.run_info(run_id)
+
+
+@app.get('/api/runs/{run_id}/report')
+def get_report(run_id: str) -> dict[str, Any]:
+    return opinion_store.report(run_id)
+
+
+@app.get('/api/runs/{run_id}/export')
+def export_run(run_id: str) -> dict[str, Any]:
+    state = opinion_store.get(run_id)
+    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key')}
+
+
+@app.get('/api/runs/{run_id}/comments')
+def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100)) -> dict[str, Any]:
+    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status)
+
+
+@app.post('/api/runs/{run_id}/actions')
+def opinion_action(run_id: str, request: OpinionAction) -> dict[str, Any]:
+    if request.action == 'stop':
+        opinion_store.stop(run_id)
+        return {'status': 'stop_requested', 'run_id': run_id}
+    return enqueue_opinion(run_id, request.action)
+
+
+@app.post('/api/runs/{run_id}/transcript')
+def import_transcript(run_id: str, request: TranscriptImport) -> dict[str, Any]:
+    opinion_store.import_transcript(run_id, request.content)
+    return enqueue_opinion(run_id, 'resume')
+
+
+@app.post('/api/runs/{run_id}/opinion-corrections')
+def correct_opinion(run_id: str, request: OpinionCorrection) -> dict[str, Any]:
+    opinion_store.correct(run_id, request.comment_id, [obs.model_dump() for obs in request.observations] if request.observations is not None else None, request.rename_from, request.rename_to)
+    return enqueue_opinion(run_id, 'resume')
+
+
+@app.post('/api/runs/{run_id}/review/complete')
+def complete_review(run_id: str) -> dict[str, Any]:
+    with opinion_store.lock:
+        state = opinion_store.get(run_id)
+        if state['status'] != 'completed':
+            raise ValueError('分析が完了してから確認済みにしてください。')
+        state['human_reviewed'] = True
+        opinion_store.save(state)
+    return opinion_store.run_info(run_id)
+
+
+@app.post('/api/runs/{run_id}/reanalyze')
+def reanalyze_opinions(run_id: str) -> dict[str, Any]:
+    seed = opinion_store.get(run_id)
+    new_run = opinion_store.create(seed['url'], seed['config'], seed)
+    return enqueue_opinion(new_run, 'resume')

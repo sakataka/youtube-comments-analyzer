@@ -25,9 +25,8 @@ export function SettingsPanel({ settings, data, busy, open, onClose, onDataActio
         <DialogHeader className="modal-header"><div><DialogTitle>設定とデータ</DialogTitle><DialogDescription>秘密値は表示せず、利用状態と保存容量だけを確認します。</DialogDescription></div><DialogClose asChild><Button variant="secondary" size="icon" type="button" aria-label="閉じる"><XIcon /></Button></DialogClose></DialogHeader>
         <div className="settings-list">
           <div><span>{settings?.youtube_api_key_env_name ?? "YOUTUBE_API_KEY"}</span><strong>{settings?.youtube_api_key_configured ? "設定済み" : "未設定"}</strong></div>
-          <div><span>AI補助</span><strong>{settings?.llm_provider ?? "codex_app_server"}</strong></div>
-          <div><span>ローカル感情モデル</span><strong>{settings?.local_sentiment.status === "available" ? "読込済み" : settings?.local_sentiment.status === "failed" ? "利用失敗" : settings?.local_sentiment.status === "disabled" ? "無効" : "遅延読込"}</strong></div>
-          {settings?.local_sentiment.model_id ? <div><span>モデル</span><strong className="settings-model-id">{settings.local_sentiment.model_id}<br />@{settings.local_sentiment.revision.slice(0, 12)}</strong></div> : null}
+          <div><span>AI分析</span><strong>{settings?.llm_provider ?? "codex_app_server"}</strong></div>
+          <div><span>分析モデル</span><strong>{settings?.model} / {settings?.effort}</strong></div>
           <div><span>分析run</span><strong>{data?.run_count ?? 0}件・{formatBytes(data?.runs.bytes ?? 0)}</strong></div>
           <div><span>YouTubeキャッシュ</span><strong>{data?.youtube_cache.file_count ?? 0}ファイル・{formatBytes(data?.youtube_cache.bytes ?? 0)}</strong></div>
           <div><span>保存データ合計</span><strong>{formatBytes(data?.total_bytes ?? 0)}</strong></div>

@@ -20,15 +20,15 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "YOUTUBE_API_KEY= YOUTUBE_FIXTURE_FALLBACK=1 SENTIMENT_FAKE_MODEL=1 SENTIMENT_AI_ENABLED=0 DATA_DIR=/tmp/youtube-comments-analyzer-e2e-v2 .venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8011",
+      command: "YOUTUBE_API_KEY= YOUTUBE_FIXTURE_FALLBACK=1 DATA_DIR=/tmp/youtube-comments-analyzer-e2e-current .venv/bin/python -m backend.tests.e2e_server",
       url: "http://127.0.0.1:8011/api/health",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 30_000
     },
     {
       command: "bun run dev:e2e",
       url: "http://127.0.0.1:4175",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 30_000
     }
   ]

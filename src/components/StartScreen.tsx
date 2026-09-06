@@ -1,6 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { formatNumber } from "../api";
-import { ReplyMode, RunJob, RunState, SettingsInfo } from "../types";
+import { ReplyMode, RunState, SettingsInfo } from "../types";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Field, FieldContent, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "./ui/field";
@@ -25,7 +25,6 @@ type Props = {
   history: RunState[];
   historyCount: number;
   busy: boolean;
-  job: RunJob | null;
   onSubmit: (event: FormEvent) => void;
   onOpenRun: (runId: string) => void;
   onDeleteRun: (runId?: string) => void;
@@ -47,7 +46,6 @@ export function StartScreen({
   history,
   historyCount,
   busy,
-  job,
   onSubmit,
   onOpenRun,
   onDeleteRun,
@@ -76,6 +74,7 @@ export function StartScreen({
         <SectionMarker index="01" label="ANALYZE" />
         <section className="start-hero" aria-labelledby="start-title">
           <h1 id="start-title">YouTubeコメントを分析</h1>
+          <p className="opinion-note">誰が、何について、どう語られているか。コメントの文脈を読み、根拠と一緒に整理します。最初の5,000件から、続きの分析へ進めます。</p>
           <form className="analysis-form" onSubmit={onSubmit}>
           <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">
@@ -97,7 +96,7 @@ export function StartScreen({
             <summary>詳細設定</summary>
             <FieldGroup className="advanced-settings__body">
               <Field className="max-comments-field" orientation="responsive">
-                <FieldLabel htmlFor="max-comments">最大コメント数</FieldLabel>
+                <FieldLabel htmlFor="max-comments">1回に取得するコメント数</FieldLabel>
                 <Input
                   id="max-comments"
                   type="number"
@@ -121,19 +120,10 @@ export function StartScreen({
               </FieldSet>
               <Field orientation="horizontal">
                 <Checkbox id="force-refresh" checked={forceRefresh} onCheckedChange={(checked) => setForceRefresh(checked === true)} />
-                <FieldLabel className="check-row" htmlFor="force-refresh">保存済みコメントとの差分を更新する</FieldLabel>
+                <FieldLabel className="check-row" htmlFor="force-refresh">保存済みデータを使わず最新のコメントを取得する</FieldLabel>
               </Field>
             </FieldGroup>
           </details>
-          {job && job.status !== "completed" ? (
-            <div className="job-progress" aria-live="polite">
-              <div>
-                <strong>{job.status === "queued" ? "分析待ち" : "コメントを分析中"}</strong>
-                <span>{jobStageLabel(job.stage)}</span>
-              </div>
-              <progress max={1} value={job.progress} />
-            </div>
-          ) : null}
           </form>
         </section>
       </div>
@@ -162,7 +152,7 @@ export function StartScreen({
                     <span>{item.video?.channel_title || "チャンネル未取得"}</span>
                     <span>
                       {formatNumber(item.fetch_summary?.max_comments_fetched)}件・
-                      {item.review_status === "verified" ? "確認済み" : "暫定"}
+                      {item.status === "completed" ? "分析完了" : item.status === "running" || item.status === "queued" ? "分析中" : "再開可能"}
                     </span>
                   </Button>
                   <Button className="recent-row__delete" variant="ghost" size="icon" type="button" disabled={busy} aria-label={`「${runTitle(item)}」を削除`} onClick={(event) => openDeleteDialog(event.currentTarget, { type: "one", run: item })}>
@@ -205,13 +195,5 @@ function runTitle(run: RunState): string {
 
 const defaultReplyModes: SettingsInfo["reply_fetch_modes"] = [
   { value: "none", label: "トップレベルのみ", uses_extra_quota: false },
-  { value: "inline_subset", label: "同梱返信を含める", uses_extra_quota: false },
   { value: "full", label: "返信を追加取得する", uses_extra_quota: true }
 ];
-
-function jobStageLabel(stage: string): string {
-  if (stage === "fetching_comments") return "YouTubeコメントを取得しています";
-  if (stage === "building_provisional_report") return "人物・感情・話題を集計しています";
-  if (stage === "queued") return "前の分析が終わるまで待機しています";
-  return stage;
-}
