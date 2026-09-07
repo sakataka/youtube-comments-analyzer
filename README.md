@@ -1,26 +1,21 @@
 # YouTube コメントインサイト
 
-動画URLから公開コメントを取得し、「誰・何が、どの論点で、どう受け取られているか」を根拠付きで整理する個人用ローカルアプリです。
-
-コメント全件を分割してAstra Mediumで読み、意見を統合し、根拠を監査します。件数・割合はプログラムで計算します。固定キーワード分類やローカル感情モデルは使用しません。実装・DB・画面・APIは現在の分析方式だけを扱います。
-
-## 設計変更予定
-
-[軽量分析の設計](docs/lightweight-analysis-design.md)で、全件の機械集計と抽出コメントのAstra Light要約へ変更する方針を定めています。開始から10分を目標とし、AI呼び出しは通常1〜2回、修復を含め最大3回です。現時点のアプリは上記の全件AI方式で、以下の操作説明も現行実装についてのものです。
+公開コメントを全件集計し、最大250件の抽出コメントをAstra Light（`gpt-6-astra` / `low`）で要約する個人用ローカルアプリです。全件の検索・並べ替え・集計はAIなしで利用できます。AIは通常1回、不正な引用やJSONを修復する場合だけ最大もう1回です。
 
 ## 使い方
 
-1. URLを入力して分析します。まず5,000件を区切りに取得し、途中結果を保存します。
-2. 「このコメント欄で語られていること」から、主な意見と根拠の原文へ進みます。
-3. 人物・商品・企画などで絞り、対象別の評価、親コメントと返信、高評価上位10%との違いを確認します。
-4. 「続きのコメントを取得・分析」で次の区切りに進めます。停止・再開にも対応します。
-5. 判断保留の根拠を確認し、必要なら対象名・意見・評価を修正できます。
+1. 動画URLを入力して分析します。コメントの取得は1回最大5,000件で区切り、原文と取得位置を保存します。
+2. 全件の集計と原文は、AIの要約が終わる前から表示します。
+3. 抽出範囲の話題と反応を読み、「根拠の原文を読む」で引用元を確認します。原文を検索し、いいね順・新しい順・返信の多い順に並べ替えられます。
+4. 部分取得の場合は「続きのコメントを取得・要約」で追加できます。停止、保存データからの再試行にも対応します。
 
-取得したコメントの分析完了と、APIで取得可能なコメントの取得完了は別に表示します。部分取得は新しい投稿に偏ります。非公開・削除済みのコメントや、コメントを投稿しない視聴者の意見は分かりません。
+通常の要約は1回180秒まで、処理全体は10分を目標に期限を設けています。別の分析が動いている間は新しい分析を開始しません。AI失敗・時間切れでも、取得済みの原文と集計を利用できます。10分以内の要約成功を保証するものではありません。
 
-## 環境
+親・返信と投稿時期で分けた無作為抽出200件に、高評価・返信の多い投稿を最大50件補足します。長文と入力全体に文字数上限があります。抽出要約から全体の賛否率は推定しません。字幕は通常の要約に使用しません。
 
-macOS、Python 3.14、Bun（`packageManager`に固定）、ログイン済みCodex CLI、YouTube Data API key。字幕の自動取得には`yt-dlp`を使います。字幕が取得できない場合も分析でき、VTT・SRT・YouTube JSON3ファイルの取り込みにも対応します。
+## 環境と起動
+
+macOS、Python 3.14、Bun（`packageManager`に固定）、ログイン済みCodex CLI、YouTube Data API key。
 
 ```sh
 uv venv --python 3.14 .venv
@@ -29,22 +24,20 @@ bun install --frozen-lockfile
 cp .env.example .env
 ```
 
-`.env`の`YOUTUBE_API_KEY`にキーを設定します。`DATA_DIR`と`DATABASE_URL`が空の場合は`data/`と`data/app.sqlite3`を使います。秘密値・コメント原文・字幕・実行結果はGitへ登録しません。
+`.env`に`YOUTUBE_API_KEY`を設定します。`DATA_DIR`と`DATABASE_URL`が空の場合は`data/`と`data/app.sqlite3`を使います。秘密値・原文・実行結果はGitへ登録しません。
 
 ```sh
 .venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 bun run dev
 ```
 
-Viteが表示したURLを開きます。LocalWebではビルド済み`dist/`を配信し、`/api`をポート8000へ接続します。
+LocalWebは`dist/`を配信し、`/api`をポート8000へ接続します。
 
-## 保存と再開
+## 保存と互換性
 
-SQLiteの`runs`に、コメント原文・親と返信の取得カーソル・字幕・背景・コメント別の分析・AIキャッシュ・意見グループ・修正・進捗を保存します。APIページとカーソルは同じスナップショットに保存するため、再開で未保存のページ末尾を落としません。
+SQLiteに原文・取得カーソル・抽出範囲・検証済み要約・使用量・試行履歴を保存します。同じ動画の保存原文は再利用でき、同じ入力と設定の要約にはキャッシュを使います。AIには投稿者名・投稿者IDを送りません。
 
-同じ動画・返信条件の保存済み取得データは新しい分析で再利用します。「保存済みデータを使わず最新のコメントを取得する」は新しい取得を開始します。過去の結果を上書きしません。親・本文・字幕が変わると影響する分析を再計算します。AI入力には投稿者名や投稿者IDを送りません。
-
-AI出力の欠落・重複・架空引用は失敗として停止し、未分析のまま残します。意味の監査で支持できない意見は判断保留に残し、確認できた意見だけを要約へ掲載します。AI停止は現在の呼び出し完了後で、最大10分の待ち時間があります。時間と呼び出し回数・文字数を保存しますが、トークン利用量は現在取得していません。
+新しいレポートは`report.v4`です。旧`report.v3`の原文と結果は保持し、旧方式と表示して閲覧できます。旧方式の続きを実行する機能は終了し、「新しい分析としてやり直す」で保存原文から新方式の別runを作成します。
 
 ## 検証
 
@@ -54,24 +47,12 @@ bun run build
 bun run test:e2e
 ```
 
-通常テストとE2Eは実API・実AIを使いません。E2Eサーバーは毎回新しい一時DBを作り、通常のDBを参照しません。デスクトップ1280px、モバイル420×912px、ダークモードを確認します。
+通常テストとE2Eは実AI・実APIを使いません。E2Eは隔離DBを使い、デスクトップ・420×912px・ダークモードで確認します。実データ2,384件から250件を抽出した2026-09-07の検証では、Astra Lightの1回の呼び出しで60.6秒、引用検証を通過しました。この1例は他動画の品質や速度の保証ではありません。
 
-分析品質の評価は[品質評価手順](docs/quality-evaluation.md)を参照してください。テスト用AIの出力は精度の証明には使いません。
+設計と検証条件は[軽量分析の設計](docs/lightweight-analysis-design.md)、残る確認は[ロードマップ](docs/roadmap.md)、障害時は[復旧手順](docs/troubleshooting.md)を参照してください。
 
-## APIと実装
+## 実装
 
-- `POST /api/runs`：URL、1回の取得件数、返信の有無、最新取得の指定。
-- `GET /api/runs`、`GET /api/runs/{id}`：履歴・状態。
-- `GET /api/runs/{id}/report`：`report.v3`の要約・集計・取得範囲。
-- `GET /api/runs/{id}/comments`：`group_id`、`analysis_status=held`、検索・ページング。
-- `POST /api/runs/{id}/actions`：`continue`、`stop`、`resume`。
-- `POST /api/runs/{id}/transcript`：時刻付き字幕の取り込みと再分析。
-- `POST /api/runs/{id}/opinion-corrections`：意見修正・対象名の統一。
-- `POST /api/runs/{id}/review/complete`：人による確認状態。
-- `POST /api/runs/{id}/reanalyze`：保存された原文から別の分析を作成。
-- `GET /api/runs/{id}/export`：原文・字幕・分析データの書き出し。
-- `GET /api/health`、`GET /api/settings`、`GET /api/data/summary`、`POST /api/data/actions`。
+`lightweight.py`が抽出・要約・v4の保存とレポート、`opinion_fetch.py`が取得、`codex_client.py`が期限と停止に対応したAI通信を担当します。`opinion_service.py`と`opinion_analysis.py`は共有する原文保存・旧結果閲覧のために残します。新規分析から旧AIパイプラインは呼びません。
 
-`opinion_fetch.py`が取得、`transcripts.py`が字幕、`opinion_analysis.py`がAI処理と集計、`opinion_service.py`が保存と実行、`codex_client.py`が既存Codex app serverとの通信を担当します。
-
-現在の境界条件と保証は[要求仕様](docs/requirements.md)、既知の未検証項目は[ロードマップ](docs/roadmap.md)に記載しています。
+主要APIは`POST /api/runs`、`GET /api/runs/{id}/report`、`GET /api/runs/{id}/comments`、`POST /api/runs/{id}/actions`、`POST /api/runs/{id}/reanalyze`です。commentsの`sort`は`newest / likes / replies`。旧字幕再分析・全件分類修正APIは変更を行わずエラーを返します。

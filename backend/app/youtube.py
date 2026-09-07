@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import json
 import re
 import urllib.parse
@@ -114,6 +116,8 @@ class YouTubeCommentClient:
         }
 
     def _get_json(self, endpoint: str, query: dict[str, Any]) -> dict[str, Any]:
+        if getattr(self, "deadline", None) and time.monotonic() >= self.deadline:
+            raise TimeoutError("コメント取得の時間枠に達しました。")
         request_url = f"{endpoint}?{urllib.parse.urlencode(query)}"
-        with urllib.request.urlopen(request_url, timeout=20) as response:
+        with urllib.request.urlopen(request_url, timeout=min(20, max(0.1, self.deadline - time.monotonic())) if getattr(self, "deadline", None) else 20) as response:
             return json.loads(response.read().decode("utf-8"))

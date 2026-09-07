@@ -11,12 +11,12 @@ os.environ['YOUTUBE_API_KEY'] = ''
 os.environ['YOUTUBE_FIXTURE_FALLBACK'] = '1'
 
 from backend.app.main import app, opinion_store
-from backend.tests.opinion_fakes import FakeOpinionClient
+from backend.tests.test_lightweight import FakeSummary
 
 original = opinion_store.process
 
 def fixture_process(run_id, youtube, progress):
-    return original(run_id, youtube, progress, client=FakeOpinionClient())
+    return original(run_id, youtube, progress, client=FakeSummary())
 
 opinion_store.process = fixture_process
 if __name__ == '__main__':

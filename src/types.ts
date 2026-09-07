@@ -32,3 +32,11 @@ export type ReplyMode = 'none' | 'full';
 export type SettingsInfo = { youtube_api_key_configured: boolean; youtube_api_key_env_name: string; max_comments: { default: number; min: number; max: number }; reply_fetch_modes: Array<{ value: ReplyMode; label: string; uses_extra_quota: boolean }>; llm_provider: string; model: string; effort: string };
 export type DataSummary = { run_count: number; total_bytes: number; runs: { bytes: number }; youtube_cache: { bytes: number; file_count: number } };
 export type RunState = { run_id: string; status: string; created_at: string; review_status: string; video: { title: string; channel_title: string; youtube_video_id: string }; fetch_summary: { max_comments_fetched: number } };
+
+export type LightReport = Omit<OpinionReport, 'schema_version' | 'analysis' | 'groups' | 'targets' | 'summary' | 'method'> & {
+  schema_version: 'report.v4'; summary_status: string;
+  topics: Array<{ id: string; title: string; description: string; reactions: string; evidence: Array<{ comment_id: string; quote: string }> }>;
+  sample: { candidate_count?: number; sent_count?: number; truncated_count?: number; reasons?: Record<string, number> };
+  statistics: { likes: number; duplicate_comments: number; dated_comments: number };
+  method: { model: string; effort: string; version: string };
+};

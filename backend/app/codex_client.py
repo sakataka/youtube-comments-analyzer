@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import select
+import queue
 import shutil
 import subprocess
 import threading
@@ -19,9 +19,13 @@ class CodexAppServerClient:
         timeout_seconds: int = 180,
         *,
         output_schema: dict[str, Any] | None = None,
+        effort: str = CODEX_REASONING_EFFORT,
+        stopped: Any = None,
     ):
         self.timeout_seconds = timeout_seconds
         self.output_schema = output_schema
+        self.effort = effort
+        self.stopped = stopped
 
     def ask(self, prompt: str) -> str:
         codex = shutil.which("codex") or "/opt/homebrew/bin/codex"
@@ -35,6 +39,7 @@ class CodexAppServerClient:
             text=True,
             encoding="utf-8",
         )
+        process._cancelled = self.stopped
         assert process.stdin is not None
         assert process.stdout is not None
         stderr_lines: list[str] = []
@@ -83,7 +88,7 @@ class CodexAppServerClient:
                         "threadId": thread_id,
                         "input": [{"type": "text", "text": prompt}],
                         "model": CODEX_MODEL,
-                        "effort": CODEX_REASONING_EFFORT,
+                        "effort": self.effort,
                         **({"outputSchema": self.output_schema} if self.output_schema else {}),
                     },
                 },
@@ -123,20 +128,30 @@ def format_stderr(stderr_lines: list[str]) -> str:
 
 def read_json_line(process: subprocess.Popen[str], deadline: float, stderr_lines: list[str]) -> dict[str, Any]:
     assert process.stdout is not None
+    if not hasattr(process, '_messages'):
+        process._messages = queue.Queue()
+        def pump():
+            try:
+                for line in process.stdout:
+                    process._messages.put(line)
+            finally:
+                process._messages.put(None)
+        threading.Thread(target=pump, daemon=True).start()
     while time.monotonic() < deadline:
-        ready, _, _ = select.select([process.stdout], [], [], min(0.25, max(0.0, deadline - time.monotonic())))
-        if not ready:
-            if process.poll() is not None:
-                break
+        cancelled = getattr(process, '_cancelled', None)
+        if cancelled and cancelled():
+            raise InterruptedError('停止して保存しました。')
+        try:
+            line = process._messages.get(timeout=min(0.25, max(0.001, deadline-time.monotonic())))
+        except queue.Empty:
             continue
-        line = process.stdout.readline()
-        if not line:
-            break
+        if line is None:
+            raise RuntimeError(f"Codex App Serverが終了しました。{format_stderr(stderr_lines)}")
         try:
             return json.loads(line)
         except json.JSONDecodeError:
             continue
-    raise RuntimeError(f"Codex App Serverから応答を取得できませんでした。{format_stderr(stderr_lines)}")
+    raise TimeoutError("Codex App Serverの応答が時間内に完了しませんでした。")
 
 
 def wait_for_thread_id(process: subprocess.Popen[str], deadline: float, stderr_lines: list[str]) -> str:
@@ -152,36 +167,26 @@ def wait_for_thread_id(process: subprocess.Popen[str], deadline: float, stderr_l
 
 
 def wait_for_turn_text(process: subprocess.Popen[str], deadline: float, stderr_lines: list[str]) -> str:
-    answer = ""
-    completed_answer = ""
-    agent_completed = False
+    final_text = ''
     while time.monotonic() < deadline:
         message = read_json_line(process, deadline, stderr_lines)
-        if "error" in message:
-            raise RuntimeError(message["error"].get("message") or "Codex App Server error")
-        method = message.get("method")
-        if method == "item/agentMessage/delta":
-            answer += (
-                message.get("params", {}).get("delta")
-                or message.get("params", {}).get("textDelta")
-                or message.get("params", {}).get("contentDelta")
-                or ""
-            )
-        elif method == "item/completed":
-            item = message.get("params", {}).get("item", {})
-            completed_text = extract_completed_agent_text(item)
-            if completed_text:
-                agent_completed = True
-                completed_answer = completed_text
-                return (answer or completed_answer).strip()
-        elif method == "thread/status/changed":
-            status = message.get("params", {}).get("status", {})
-            status_type = status.get("type") if isinstance(status, dict) else status
-            if status_type == "idle" and ((answer or completed_answer).strip() or agent_completed):
-                return (answer or completed_answer).strip()
-        elif method == "turn/completed":
-            return (answer or completed_answer).strip()
-    raise RuntimeError(f"Codex App Serverのturnが時間内に完了しませんでした。{format_stderr(stderr_lines)}")
+        if 'error' in message:
+            raise RuntimeError(message['error'].get('message') or 'Codex App Server error')
+        method = message.get('method')
+        params = message.get('params', {})
+        if method == 'item/completed':
+            item = params.get('item', {})
+            text = extract_completed_agent_text(item)
+            if text and item.get('phase') != 'commentary':
+                final_text = text
+        elif method == 'turn/completed':
+            turn = params.get('turn', {})
+            if turn.get('status') != 'completed':
+                raise RuntimeError('Codexの要約が完了しませんでした: ' + str(turn.get('status', 'unknown')))
+            if not final_text:
+                raise ValueError('AIの最終回答が空でした。')
+            return final_text.strip()
+    raise TimeoutError('Codexの要約が時間内に完了しませんでした。')
 
 
 def extract_completed_agent_text(item: dict[str, Any]) -> str:

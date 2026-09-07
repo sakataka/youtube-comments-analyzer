@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { LightReportView } from './LightReportView';
+import type { LightReport } from '../types';
 import { api, formatNumber, formatPercent } from '../api';
 import type { EvidenceComment, EvidencePage, Observation, OpinionGroup, OpinionReport } from '../types';
 import { AppHeader } from './AppHeader';
@@ -12,7 +14,7 @@ const emotions: Record<string, string> = { joy: '喜び', admiration: '称賛', 
 const stages: Record<string, string> = { created: '開始準備', queued: '順番待ち', fetching: 'コメント取得', subtitles: '字幕取得', background: '動画の背景を整理', reading: 'コメントを文脈に沿って分析', grouping: '意見の統合・根拠の検証', completed: '取得範囲の分析完了', paused: '停止中', interrupted: '再開できます', correction_saved: '修正を保存', transcript_changed: '字幕を変更' };
 
 export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpenRun }: { runId: string; onNewAnalysis: () => void; onOpenSettings: () => void; onOpenRun: (id: string) => void }) {
-  const [report, setReport] = useState<OpinionReport | null>(null);
+  const [report, setReport] = useState<OpinionReport | LightReport | null>(null);
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
   const [evidenceGroup, updateEvidenceGroup] = useState<string | null | undefined>(undefined);
@@ -23,13 +25,12 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
     if (value === undefined) window.requestAnimationFrame(() => evidenceTrigger.current?.focus());
   }
   const [target, setTarget] = useState('');
-  const [rename, setRename] = useState('');
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
     async function refresh() {
       try {
-        const next = await api<OpinionReport>(`/api/runs/${runId}/report`);
+        const next = await api<OpinionReport | LightReport>(`/api/runs/${runId}/report`);
         if (active) { setReport(next); setError(''); }
       } catch (caught) { if (active) setError(message(caught)); }
       if (active) timer = window.setTimeout(refresh, 1800);
@@ -42,12 +43,13 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
     setWorking(true);
     try {
       await api(`/api/runs/${runId}/${path}`, { method: 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-      setReport(await api<OpinionReport>(`/api/runs/${runId}/report`));
-      if (path === 'actions' && (body as { action: string }).action === 'stop') toast.info('現在の処理を保存して停止します。AIの応答待ちは最大10分かかる場合があります。');
+      setReport(await api<OpinionReport | LightReport>(`/api/runs/${runId}/report`));
+      if (path === 'actions' && (body as { action: string }).action === 'stop') toast.info('停止を要求しました。現在の処理を終了して保存します。');
     } catch (caught) { toast.error(message(caught)); return false; }
     finally { setWorking(false); }
     return true;
   }
+  if (report?.schema_version === 'report.v4') return <LightReportView key={runId} report={report} error={error} working={working} action={action} onNewAnalysis={onNewAnalysis} onOpenSettings={onOpenSettings} onOpenRun={onOpenRun} />;
   const running = report?.status === 'running' || report?.status === 'queued';
   const groups = report?.groups.filter(group => !target || group.target === target) ?? [];
   const selectedGroup = report?.groups.find(group => group.id === evidenceGroup);
@@ -56,7 +58,7 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
     {error ? <p role="alert" className="opinion-error">{error}</p> : null}
     {!report ? <p role="status">保存済みの分析を読み込んでいます…</p> : <>
       <header className="opinion-intro">
-        <p className="opinion-eyebrow">COMMENT INSIGHTS <span>取得範囲の反応を読む</span></p>
+        <p className="opinion-eyebrow">旧方式の保存結果 · 新しい分析としてやり直すと軽量方式を使います</p>
         <h1>{report.video.title || 'コメント欄を読み解いています'}</h1>
         <p>{report.video.channel_title} · <a href={report.video.url} target="_blank" rel="noreferrer">YouTubeで動画を見る ↗</a></p>
       </header>
@@ -70,8 +72,6 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
         <div className="opinion-actions">
           {report.analysis.held ? <Button variant="outline" onClick={() => setEvidenceGroup("__held")}>判断保留の根拠を確認</Button> : null}
           {running ? <Button variant="outline" disabled={working} onClick={() => void action('actions', { action: 'stop' })}>停止して保存</Button> : <>
-            {report.status !== 'completed' ? <Button disabled={working} onClick={() => void action('actions', { action: 'resume' })}>保存した続きから再開</Button> : null}
-            {report.can_continue ? <Button disabled={working} onClick={() => void action('actions', { action: 'continue' })}>続きのコメントを取得・分析</Button> : null}
             <Button variant="outline" disabled={working} onClick={async () => { setWorking(true); try { const result = await api<{ run_id: string }>(`/api/runs/${runId}/reanalyze`, { method: 'POST' }); onOpenRun(result.run_id); } catch (caught) { toast.error(message(caught)); } finally { setWorking(false); } }}>新しい分析としてやり直す</Button>
           </>}
         </div>
@@ -80,7 +80,6 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
           <p>取得開始：{date(report.coverage.fetched_at)} ／ 保存更新：{date(report.coverage.updated_at)} ／ YouTube表示コメント数：{formatNumber(report.coverage.youtube_comment_count)}</p>
           <p>字幕：{report.transcript.status === 'available' ? `${report.transcript.segment_count}区間・${report.transcript.language}${report.transcript.automatic ? '（自動字幕には誤認識の可能性があります）' : ''}` : report.transcript.reason || '取得待ち'}</p>
           <p>処理時間 {Math.round(report.usage.elapsed_seconds / 60)}分 ／ AI呼び出し {report.usage.calls}回 ／ 入力 {formatNumber(report.usage.input_characters)}文字。トークン利用量は取得できていません。</p>
-          <label className="opinion-upload">字幕を取り込んで再分析（VTT・SRT・JSON3）<Input type="file" accept=".vtt,.srt,.json3,.json" disabled={running || working} onChange={async event => { const file = event.target.files?.[0]; if (file) { if (file.size > 5_000_000) toast.error('字幕は5MB以下にしてください。'); else await action('transcript', { content: await file.text() }); } event.target.value = ''; }} /></label>
           <p>字幕は解釈の背景です。字幕の発言をコメント投稿者の意見として数えません。</p>
         </div></details>
       </section>
@@ -104,7 +103,6 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
           <Button variant="outline" onClick={() => setEvidenceGroup(group.id)}>根拠コメント {group.comment_count}件を読む</Button>
           {group.counter_group_ids.length ? <div className="opinion-counter">{group.counter_group_ids.map(id => <button key={id} onClick={() => setEvidenceGroup(id)}>異なる評価の根拠を読む →</button>)}</div> : null}
         </article>)}</div>
-        {target ? <details className="opinion-rename"><summary>この対象の名前・別名を修正する</summary><form onSubmit={event => { event.preventDefault(); void action('opinion-corrections', { rename_from: target, rename_to: rename }); setTarget(''); }}><Input aria-label="統一する対象名" placeholder="統一する名前" maxLength={160} value={rename} onChange={event => setRename(event.target.value)} required /><Button disabled={running || working}>保存して再集計</Button></form></details> : null}
       </section>
       <section className="opinion-section" aria-labelledby="opinion-targets">
         <div className="opinion-section-heading"><span>03 / PEOPLE &amp; SUBJECTS</span><h2 id="opinion-targets">誰・何が語られているか</h2></div>
@@ -119,7 +117,7 @@ export function OpinionReportView({ runId, onNewAnalysis, onOpenSettings, onOpen
         <p className="opinion-note">投稿者IDを取得できた {report.concentration.known_author_comments}件は {report.concentration.unique_authors}人からの投稿。最多投稿者は {report.concentration.max_comments_per_author}件。同文の繰り返しは {report.concentration.duplicate_text_comments}件あり、自動除外していません。</p>
       </section>
       <footer className="opinion-footer"><Button variant="outline" onClick={() => setEvidenceGroup(null)}>すべての原文を検索する</Button><Button variant="ghost" disabled={running || working || report.status !== 'completed' || report.review.human_reviewed} onClick={() => void action('review/complete')}>人が全体を確認済みにする</Button><p>判断保留 {report.analysis.held}件 · 意見・対象言及なし {report.analysis.no_opinion}件 · 文脈に不足のある投稿 {report.analysis.context_incomplete}件</p></footer>
-      <EvidenceDialog key={runId} runId={runId} group={selectedGroup} groupId={evidenceGroup} running={running || working} videoId={report.video.youtube_video_id} onClose={() => setEvidenceGroup(undefined)} onCorrect={body => action('opinion-corrections', body)} />
+      <EvidenceDialog key={runId} runId={runId} group={selectedGroup} groupId={evidenceGroup} running={true} videoId={report.video.youtube_video_id} onClose={() => setEvidenceGroup(undefined)} onCorrect={body => action('opinion-corrections', body)} />
     </>}
   </main>;
 }
@@ -147,7 +145,7 @@ function EvidenceDialog({ runId, group, groupId, running, videoId, onClose, onCo
     {error ? <p role="alert">{error}</p> : !page ? <p role="status">読み込み中…</p> : <><p>{page.total}件中 {page.total ? offset + 1 : 0}〜{Math.min(offset + 30, page.total)}件</p>
       <div className="opinion-evidence-list">{page.comments.map(comment => <article key={comment.comment_id} className="opinion-evidence-row"><p className="opinion-note">{comment.is_reply ? '返信' : '親コメント'} · {date(comment.published_at)} · いいね {comment.like_count}</p>{comment.parent_text ? <details><summary>返信先の文脈</summary><blockquote>{comment.parent_text}</blockquote></details> : null}<p className="opinion-original">{comment.text_original}</p>{comment.analysis_status === "held" ? <p className="opinion-note">判断保留：{comment.review_reason || "対象や評価を確定できていません。"}</p> : comment.analysis_status === "pending" ? <p className="opinion-note">このコメントは未分析です。</p> : null}<a href={comment.url} target="_blank" rel="noreferrer">YouTubeのコメントを開く ↗</a>
         {comment.subtitles.length ? <details><summary>解釈に使った字幕</summary>{comment.subtitles.map(segment => <p key={segment.id}><a href={`https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(segment.start)}`} target="_blank" rel="noreferrer">{Math.floor(segment.start / 60)}:{String(Math.floor(segment.start % 60)).padStart(2, '0')}</a> {segment.text}</p>)}</details> : null}
-        <CorrectionEditor comment={comment} disabled={running} onSave={async observations => { if (await onCorrect({ comment_id: comment.comment_id, observations })) onClose(); }} />
+        {!running ? <CorrectionEditor comment={comment} disabled={running} onSave={async observations => { if (await onCorrect({ comment_id: comment.comment_id, observations })) onClose(); }} /> : null}
       </article>)}</div><div className="opinion-actions"><Button variant="outline" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 30))}>前へ</Button><Button variant="outline" disabled={offset + 30 >= page.total} onClick={() => setOffset(value => value + 30)}>次へ</Button></div></>}
   </DialogContent></Dialog>;
 }

@@ -12,16 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .codex_client import CODEX_MODEL, CODEX_REASONING_EFFORT
 from .opinion_analysis import Observation
-from .opinion_service import OpinionStore
+from .lightweight import LightweightStore, MODEL, EFFORT
 from .youtube import YouTubeCommentClient
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT_DIR / '.env')
 DATA_DIR = Path(os.getenv('DATA_DIR') or ROOT_DIR / 'data')
 DB_PATH = Path(os.getenv('DATABASE_URL') or DATA_DIR / 'app.sqlite3')
-opinion_store = OpinionStore(DB_PATH)
+opinion_store = LightweightStore(DB_PATH)
 youtube_client = YouTubeCommentClient(DATA_DIR, ROOT_DIR / 'fixtures' / 'sample_comments_drawme.jsonl')
 job_executor = ThreadPoolExecutor(max_workers=1)
 app = FastAPI(title='YouTube Comment Insights')
@@ -71,12 +70,12 @@ async def bad_input(_request: Request, exc: ValueError) -> JSONResponse:
 
 @app.get('/api/health')
 def health() -> dict[str, str]:
-    return {'status': 'ok', 'report_schema': 'report.v3'}
+    return {'status': 'ok', 'report_schema': 'report.v4'}
 
 
 @app.get('/api/settings')
 def settings() -> dict[str, Any]:
-    return {'youtube_api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')), 'youtube_api_key_env_name': 'YOUTUBE_API_KEY', 'max_comments': {'default': 5000, 'min': 1, 'max': 5000}, 'reply_fetch_modes': [{'value': 'none', 'label': '親コメントのみ', 'uses_extra_quota': False}, {'value': 'full', 'label': '返信を追加取得する', 'uses_extra_quota': True}], 'llm_provider': 'codex_app_server', 'model': CODEX_MODEL, 'effort': CODEX_REASONING_EFFORT}
+    return {'youtube_api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')), 'youtube_api_key_env_name': 'YOUTUBE_API_KEY', 'max_comments': {'default': 5000, 'min': 1, 'max': 5000}, 'reply_fetch_modes': [{'value': 'none', 'label': '親コメントのみ', 'uses_extra_quota': False}, {'value': 'full', 'label': '返信を追加取得する', 'uses_extra_quota': True}], 'llm_provider': 'codex_app_server', 'model': MODEL, 'effort': EFFORT}
 
 
 def directory_summary(path: Path) -> dict[str, Any]:
@@ -147,12 +146,12 @@ def get_report(run_id: str) -> dict[str, Any]:
 @app.get('/api/runs/{run_id}/export')
 def export_run(run_id: str) -> dict[str, Any]:
     state = opinion_store.get(run_id)
-    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key')}
+    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache')}
 
 
 @app.get('/api/runs/{run_id}/comments')
-def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100)) -> dict[str, Any]:
-    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status)
+def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest') -> dict[str, Any]:
+    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort)
 
 
 @app.post('/api/runs/{run_id}/actions')
