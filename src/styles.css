@@ -349,3 +349,19 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .opinion-target-list button { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; text-align: left; padding: 18px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
 .opinion-target-list small { grid-column: 1 / -1; color: var(--muted-foreground); line-height: 1.8; }
 .opinion-target-list span { font-size: .85rem; }
+
+.person-statistics { display: grid; gap: 14px; margin-block: 20px; }
+.person-stat-card { border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+.person-stat-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.person-stat-heading h3 { margin: 0; font-size: 18px; }
+.person-stance-bar { display: flex; height: 9px; overflow: hidden; border-radius: 6px; background: #9299a633; margin: 14px 0; }
+.person-stance-positive { background: #34866a; }
+.person-stance-negative { background: #c66755; }
+.person-stance-mixed { background: #b38a35; }
+.person-stance-unclear { background: #9299a6; }
+.person-stance-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.person-stance-counts button { white-space: normal; height: auto; min-height: 36px; }
+.person-stance-dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
+.person-dictionary { display: grid; gap: 10px; margin-top: 16px; }
+.person-dictionary textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font: inherit; background: transparent; }
+.person-judgement { padding: 10px; border-left: 3px solid #9299a6; font-size: 13px; overflow-wrap: anywhere; }

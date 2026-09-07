@@ -38,3 +38,25 @@ test('v4 小さい取得区切りから続行できる', async ({ page }, testIn
   await expect(page.getByLabel('取得と要約の状況')).toContainText('6件取得');
   await expect(page.getByText('抽出コメントの要約完了',{exact:true})).toBeVisible();
 });
+
+test('人物別件数から原文・判定理由へ進み、別名をAIなしで修正できる', async ({page},testInfo) => {
+  const result=await page.request.post('/api/runs',{data:{url:'https://www.youtube.com/watch?v=vlpLbiqNhLo',force_refresh:true}});
+  const {run_id}=await result.json();
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).person_statistics.status).toBe('completed');
+  await page.goto(`/?run=${run_id}`);
+  const section=page.getByRole('region',{name:'人物別の言及と評価'});
+  await expect(section.getByRole('heading',{name:'誰について語られているか'})).toBeVisible();
+  await section.getByRole('button',{name:'人物名・別名の辞書を編集'}).click();
+  await page.getByLabel('1行に「人物名: 別名1, 別名2」。人物名そのものも集計に使います。').fill('風吹ケイ: 風吹, ケイ\n森脇梨々夏: 森脇, 梨々夏');
+  const before=await (await page.request.get(`/api/runs/${run_id}/report`)).json();
+  await page.getByRole('button',{name:'辞書を保存して再集計'}).click();
+  await expect(section.getByRole('heading',{name:'風吹ケイ',exact:true})).toBeVisible();
+  const after=await (await page.request.get(`/api/runs/${run_id}/report`)).json();
+  expect(after.usage.calls).toBe(before.usage.calls);expect(after.topics).toEqual(before.topics);
+  await section.locator('.person-stat-card').filter({has:page.getByRole('heading',{name:'風吹ケイ',exact:true})}).getByRole('button',{name:/件 · 全件の/}).click();
+  await expect(page.getByText(/絞り込み：風吹ケイ/)).toBeVisible();
+  await expect(page.locator('.person-judgement').first()).toContainText('一致した呼び名');
+  await section.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:`/tmp/person-statistics-${testInfo.project.name}.png`,fullPage:false});
+});

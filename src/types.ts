@@ -25,7 +25,7 @@ export type OpinionReport = {
   usage: { calls: number; input_characters: number; output_characters: number; elapsed_seconds: number; tokens: number | null };
   can_continue: boolean; method: { model: string; effort: string; version: string; top_definition: string };
 };
-export type EvidenceComment = { comment_id: string; text_original: string; like_count: number; published_at: string; is_reply: boolean; parent_text: string | null; review_reason: string | null; analysis_status: string; observations: Observation[]; subtitles: Array<{ id: string; start: number; end: number; text: string }>; url: string };
+export type EvidenceComment = { person_judgements?: Record<string, PersonJudgement>; comment_id: string; text_original: string; like_count: number; published_at: string; is_reply: boolean; parent_text: string | null; review_reason: string | null; analysis_status: string; observations: Observation[]; subtitles: Array<{ id: string; start: number; end: number; text: string }>; url: string };
 export type EvidencePage = { comments: EvidenceComment[]; total: number; offset: number; limit: number };
 
 export type ReplyMode = 'none' | 'full';
@@ -34,9 +34,15 @@ export type DataSummary = { run_count: number; total_bytes: number; runs: { byte
 export type RunState = { run_id: string; status: string; created_at: string; review_status: string; video: { title: string; channel_title: string; youtube_video_id: string }; fetch_summary: { max_comments_fetched: number } };
 
 export type LightReport = Omit<OpinionReport, 'schema_version' | 'analysis' | 'groups' | 'targets' | 'summary' | 'method'> & {
-  schema_version: 'report.v4'; summary_status: string;
+  schema_version: 'report.v4'; summary_status: string; person_statistics?: PersonStatistics;
   topics: Array<{ id: string; title: string; description: string; reactions: string; evidence: Array<{ comment_id: string; quote: string }> }>;
   sample: { candidate_count?: number; sent_count?: number; truncated_count?: number; reasons?: Record<string, number> };
   statistics: { likes: number; duplicate_comments: number; dated_comments: number };
   method: { model: string; effort: string; version: string };
+};
+
+export type PersonJudgement = { label: 'positive' | 'negative' | 'mixed' | 'unclear'; aliases: string[]; signals: Array<{ stance: string; term: string; clause: string }>; reasons: string[] };
+export type PersonStatistics = {
+  status: string; source?: string; error?: string; denominator?: number; matched_comments?: number; unmatched_comments?: number;
+  warnings?: string[]; people?: Array<{ id: string; name: string; aliases: string[]; count: number; rate: number; parents: number; replies: number; stances: Record<string, number>; stance_rates: Record<string, number> }>;
 };

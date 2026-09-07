@@ -74,7 +74,7 @@ export function StartScreen({
         <SectionMarker index="01" label="ANALYZE" />
         <section className="start-hero" aria-labelledby="start-title">
           <h1 id="start-title">YouTubeコメントを分析</h1>
-          <p className="opinion-note">全件を集計し、最大250件の抽出コメントをAstra Lightで要約します。AIは通常1回。根拠の原文を確認しながら、話題と反応をつかめます。</p>
+          <p className="opinion-note">全件を集計し、最大250件の抽出コメントをAstra Lightで要約します。人物名・別名の辞書で全件の言及と評価も参考集計します。AIは通常2回。根拠の原文を確認しながら、話題と反応をつかめます。</p>
           <form className="analysis-form" onSubmit={onSubmit}>
           <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">

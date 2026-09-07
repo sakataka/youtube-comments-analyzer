@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .opinion_analysis import Observation
+from .person_statistics import ManualDictionary
 from .lightweight import LightweightStore, MODEL, EFFORT
 from .youtube import YouTubeCommentClient
 
@@ -39,7 +40,7 @@ class RunCreateRequest(RequestModel):
 
 
 class OpinionAction(RequestModel):
-    action: Literal['continue', 'stop', 'resume']
+    action: Literal['continue', 'stop', 'resume', 'people']
 
 
 class TranscriptImport(RequestModel):
@@ -146,12 +147,12 @@ def get_report(run_id: str) -> dict[str, Any]:
 @app.get('/api/runs/{run_id}/export')
 def export_run(run_id: str) -> dict[str, Any]:
     state = opinion_store.get(run_id)
-    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache')}
+    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache', 'people_cache')}
 
 
 @app.get('/api/runs/{run_id}/comments')
-def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest') -> dict[str, Any]:
-    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort)
+def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest', person_id: str | None = None, stance: Literal['positive','negative','mixed','unclear'] | None = None) -> dict[str, Any]:
+    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort, person_id, stance)
 
 
 @app.post('/api/runs/{run_id}/actions')
@@ -190,3 +191,8 @@ def reanalyze_opinions(run_id: str) -> dict[str, Any]:
     seed = opinion_store.get(run_id)
     new_run = opinion_store.create(seed['url'], seed['config'], seed)
     return enqueue_opinion(new_run, 'resume')
+
+
+@app.post('/api/runs/{run_id}/people')
+def update_people(run_id: str, request: ManualDictionary) -> dict[str, Any]:
+    return opinion_store.update_people(run_id, [p.model_dump() for p in request.people])

@@ -12,6 +12,7 @@ from .codex_client import CodexAppServerClient, parse_json_object
 from .opinion_analysis import aggregate, digest
 from .opinion_fetch import fetch_round
 from .opinion_service import OpinionStore, now
+from . import person_statistics as people_rules
 
 MODEL, EFFORT = 'gpt-6-astra', 'low'
 VERSION = 'sample-v1'
@@ -93,13 +94,14 @@ class LightweightStore(OpinionStore):
         for run_id, in self.conn.execute('select id from runs').fetchall():
             state = self.get(run_id)
             if state.get('schema_version') == 'report.v4' and state['stage'] == 'interrupted':
-                state['summary_status'] = 'stopped'
+                if state.get('summary_status') in ('running','not_started'): state['summary_status'] = 'stopped'
+                if state.get('people_status') == 'running': state['people_status'] = 'stopped'
                 self.save(state)
 
     def create(self, url, config, seed=None):
         run_id = super().create(url,config,seed)
         state = self.get(run_id)
-        state.update(schema_version='report.v4', summary_status='not_started', topics=[], sample={}, attempts=[], summary_cache=(seed or {}).get('summary_cache', {}))
+        state.update(schema_version='report.v4', summary_status='not_started', topics=[], sample={}, attempts=[], summary_cache=(seed or {}).get('summary_cache', {}), people_status='not_started', people_cache=(seed or {}).get('people_cache', {}), people_dictionary=(seed or {}).get('people_dictionary') if (seed or {}).get('people_source') == 'manual' else None, people_source='manual' if (seed or {}).get('people_source') == 'manual' else None)
         self.save(state)
         return run_id
 
@@ -121,6 +123,7 @@ class LightweightStore(OpinionStore):
             return report
         counts = Counter(r['text_original'] for r in state['comments'])
         report.update(schema_version='report.v4', topics=state.get('topics',[]), summary_status=state.get('summary_status','not_started'), sample={k:v for k,v in state.get('sample',{}).items() if k!='items'}, attempts=state.get('attempts',[]), statistics={'likes':sum(int(r.get('like_count') or 0) for r in state['comments']), 'duplicate_comments':sum(n-1 for n in counts.values()), 'dated_comments':sum(bool(r.get('published_at')) for r in state['comments'])})
+        report['person_statistics'] = {**{k:v for k,v in state.get('person_statistics',{}).items() if k != 'assignments'}, 'status':state.get('people_status','not_started'), 'source':state.get('people_source'), 'error':state.get('people_error')}
         report['method'] = {'model':MODEL,'effort':EFFORT,'version':VERSION}
         for key in ('analysis','groups','targets','summary'):
             report.pop(key,None)
@@ -133,7 +136,7 @@ class LightweightStore(OpinionStore):
             info.update(schema_version='report.v4', summary_status=state.get('summary_status'), progress=1 if state['status']=='completed' else 0)
         return info
 
-    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest'):
+    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest', person_id=None, stance=None):
         state = self.get(run_id)
         if state.get('schema_version') != 'report.v4':
             return super().comments_page(run_id,group_id,search,offset,limit,analysis_status)
@@ -143,11 +146,14 @@ class LightweightStore(OpinionStore):
             if topic is None: raise KeyError('話題が見つかりません。')
             ids = {e['comment_id'] for e in topic['evidence']}
             rows = [r for r in rows if r['comment_id'] in ids]
+        assignments=state.get('person_statistics',{}).get('assignments',{}) if state.get('people_status') == 'completed' else {}
+        if person_id:
+            rows=[r for r in rows if person_id in assignments.get(r['comment_id'],{}) and (not stance or assignments[r['comment_id']][person_id]['label']==stance)]
         if search: rows = [r for r in rows if search.casefold() in r['text_original'].casefold()]
         field = {'newest':'published_at','likes':'like_count','replies':'reply_count'}[sort]
         rows = sorted(rows,key=lambda r:(r.get(field) or ('' if field=='published_at' else 0),r['comment_id']),reverse=True)
         lookup = {r['comment_id']:r for r in state['comments']}
-        output = [{**r,'parent_text':lookup.get(r.get('parent_comment_id'),{}).get('text_original'), 'url':f"https://www.youtube.com/watch?v={state['video']['youtube_video_id']}&lc={r['comment_id']}"} for r in rows[offset:offset+limit]]
+        output = [{**r,'person_judgements':assignments.get(r['comment_id'],{}),'parent_text':lookup.get(r.get('parent_comment_id'),{}).get('text_original'), 'url':f"https://www.youtube.com/watch?v={state['video']['youtube_video_id']}&lc={r['comment_id']}"} for r in rows[offset:offset+limit]]
         return {'comments':output,'total':len(rows),'offset':offset,'limit':limit}
 
     def correct(self,*args,**kwargs):
@@ -162,20 +168,24 @@ class LightweightStore(OpinionStore):
             raise ValueError('旧方式は実行できません。')
         started = time.monotonic()
         queued = datetime.fromisoformat(state.get('queued_at',now()))
-        deadline = started + max(0,600-(datetime.now(timezone.utc)-queued).total_seconds())
+        deadline = started + max(0,900-(datetime.now(timezone.utc)-queued).total_seconds())
         base = state['usage']['elapsed_seconds']
         attempt = {'started_at':now(),'calls':0,'input_characters':0,'output_characters':0,'stages':{}}
         state['attempts'].append(attempt)
-        state.update(status='running',stage='fetching',summary_status='not_started',error_message=None,human_reviewed=False,topics=[],sample={})
+        person_only=state.get('pending_action') == 'people'
+        state.update(status='running',stage='people' if person_only else 'fetching',error_message=None)
+        state.update(people_status='not_started',people_error=None)
+        if not person_only: state.update(summary_status='not_started',human_reviewed=False,topics=[],sample={})
         def checkpoint():
             state['usage']['elapsed_seconds'] = round(base+time.monotonic()-started,1)
             self.save(state)
             progress(state['stage'],state['status'])
         def guard():
             if self.stopped(run_id): raise InterruptedError('停止して保存しました。')
-            if time.monotonic() >= deadline-15: raise TimeoutError('10分の時間枠に達しました。集計と原文は利用できます。')
+            if time.monotonic() >= deadline-15: raise TimeoutError('15分の時間枠に達しました。集計と原文は利用できます。')
         try:
             checkpoint(); guard()
+            if person_only: return
             fetch_started = time.monotonic()
             fetch_deadline = min(deadline-15,fetch_started+120)
             action = state.get('pending_action','resume')
@@ -240,11 +250,99 @@ class LightweightStore(OpinionStore):
                 attempt['stages']['ai_seconds']=round(time.monotonic()-ai_started,2)
             state.update(status='completed',stage='completed',summary_status='completed')
         except InterruptedError as exc:
-            state.update(status='paused',stage='paused',summary_status='stopped',error_message=str(exc))
+            state.update(status='paused',stage='paused',error_message=str(exc))
+            if not person_only:state['summary_status']='stopped'
         except TimeoutError as exc:
-            state.update(status='paused',stage='paused',summary_status='timed_out',error_message=str(exc))
+            state.update(status='paused',stage='paused',error_message=str(exc))
+            if not person_only:state['summary_status']='timed_out'
         except Exception as exc:
-            state.update(status='failed',stage='failed',summary_status='failed',error_message=str(exc)[:500])
+            state.update(status='failed',stage='failed',error_message=str(exc)[:500])
+            if not person_only:state['summary_status']='failed'
         finally:
-            attempt.update(elapsed_seconds=round(time.monotonic()-started,1),ended_at=now(),result=state['summary_status'])
+            if not state['comments'] and state['summary_status']=='completed':
+                state.update(people_status='completed',person_statistics=people_rules.compute_statistics([],{'people':[],'warnings':[]}))
+            elif state['comments'] and not self.stopped(run_id) and time.monotonic()<deadline-45:
+                self.process_people(state, attempt, checkpoint, guard, deadline, client)
+            elif state.get('people_status') != 'completed':
+                state['people_status']='stopped' if self.stopped(run_id) else 'timed_out'
+            if state.get('people_status') == 'completed' and state['summary_status'] == 'completed':
+                state.update(status='completed',stage='completed')
+            elif state['status'] == 'running':
+                state.update(status='paused',stage='paused')
+            attempt.update(elapsed_seconds=round(time.monotonic()-started,1),ended_at=now(),result=state['summary_status'], people_result=state.get('people_status'))
             checkpoint()
+
+    def process_people(self, state, attempt, checkpoint, guard, deadline, client):
+        started=time.monotonic()
+        previous_status, previous_stage = state['status'], state['stage']
+        state.update(status='running',people_status='running',people_error=None,stage='people')
+        checkpoint()
+        try:
+            guard()
+            if state.get('people_source') != 'manual' or not state.get('people_dictionary'):
+                # Reuse the same bounded sample without a second selection strategy.
+                if not state.get('sample',{}).get('items'): make_prompt(state)
+                metadata=(state['video'].get('title','')+'\n'+state['video'].get('description',''))[:6000]
+                sources={'metadata':metadata}
+                payload={'metadata':metadata,'comments':[]}
+                prefix=people_rules.INSTRUCTIONS+'\ninput:\n'
+                schema=people_rules.PersonDictionary.model_json_schema()
+                schema_chars=len(json.dumps(schema,ensure_ascii=False))
+                for item in state['sample']['items']:
+                    entry={'comment_id':item['comment_id'],'text':item['text']}
+                    payload['comments'].append(entry)
+                    if len(prefix)+len(json.dumps(payload,ensure_ascii=False))+schema_chars>48000:
+                        payload['comments'].pop();continue
+                    sources[item['comment_id']]=item['text']
+                prompt=prefix+json.dumps(payload,ensure_ascii=False)
+                chars=len(prompt)+schema_chars
+                key=digest([people_rules.VERSION,MODEL,EFFORT,prompt,schema])
+                cache=state.setdefault('people_cache',{})
+                if key in cache:
+                    dictionary=cache[key];attempt['people_cache_hit']=True
+                else:
+                    for retry in range(2):
+                        guard()
+                        if deadline-time.monotonic()<45:raise TimeoutError('人物辞書作成の時間枠が不足しています。')
+                        if chars>48000 or attempt['input_characters']+chars>240000 or attempt['calls']>=4:raise ValueError('AI呼び出し上限に達しました。')
+                        attempt['calls']+=1;attempt['input_characters']+=chars;attempt['people_calls']=attempt.get('people_calls',0)+1
+                        state['usage']['calls']+=1;state['usage']['input_characters']+=chars
+                        checkpoint()
+                        engine=client or CodexAppServerClient(timeout_seconds=min(180,deadline-time.monotonic()-15),output_schema=schema,effort=EFFORT,stopped=lambda:self.stopped(state['run_id']))
+                        try:
+                            raw=engine.ask(prompt);guard()
+                            attempt['output_characters']+=len(raw);state['usage']['output_characters']+=len(raw)
+                            if len(raw)>24000:raise ValueError('人物辞書の出力が長すぎます。')
+                            dictionary=people_rules.validate_dictionary(parse_json_object(raw),sources)
+                            cache[key]=dictionary
+                            break
+                        except ValueError:
+                            if retry:raise
+                state.update(people_dictionary=dictionary,people_source='ai')
+            guard()
+            state['person_statistics']=people_rules.compute_statistics(state['comments'],state['people_dictionary'])
+            state['people_status']='completed'
+        except InterruptedError as exc:
+            state.update(people_status='stopped',people_error=str(exc))
+        except TimeoutError as exc:
+            state.update(people_status='timed_out',people_error=str(exc))
+        except Exception as exc:
+            state.update(people_status='failed',people_error=str(exc)[:500])
+        finally:
+            if state['people_status'] in ('stopped','timed_out'):
+                state.update(status='paused',stage='paused')
+            else:
+                state.update(status=previous_status,stage=previous_stage)
+            attempt['stages']['people_seconds']=round(time.monotonic()-started,2)
+            checkpoint()
+
+    def update_people(self, run_id, people):
+        with self.lock:
+            state=self.get(run_id)
+            if state.get('schema_version') != 'report.v4':raise ValueError('軽量方式のレポートで編集してください。')
+            if state['status'] in ('running','queued'):raise ValueError('分析を停止してから辞書を編集してください。')
+            dictionary=people_rules.clean_dictionary(people)
+            state.update(people_dictionary=dictionary,people_source='manual',people_status='completed',people_error=None)
+            state['person_statistics']=people_rules.compute_statistics(state['comments'],dictionary)
+            self.save(state)
+            return self.report(run_id)

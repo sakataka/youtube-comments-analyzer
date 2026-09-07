@@ -13,7 +13,11 @@ class FakeSummary:
     def __init__(self, invalid=False): self.calls=0; self.invalid=invalid
     def ask(self,prompt):
         self.calls+=1
-        row=json.loads(prompt.split('\ninput:\n')[1])['sample_comments'][0]
+        payload=json.loads(prompt.split('\ninput:\n')[1])
+        if 'comments' in payload:
+            row=payload['comments'][0]; name=row['text'][:2]
+            return json.dumps({'people':[{'name':name,'aliases':[{'text':name,'evidence_id':row['comment_id'],'quote':row['text'][:50]}]}]},ensure_ascii=False)
+        row=payload['sample_comments'][0]
         return json.dumps({'topics':[{'title':'反応','description':'投稿の反応','reactions':'感想が述べられています。','evidence':[{'comment_id':row['comment_id'],'quote':'架空の引用' if self.invalid else row['text'][:100]}]}]},ensure_ascii=False)
 
 class LightweightTests(unittest.TestCase):
@@ -28,13 +32,13 @@ class LightweightTests(unittest.TestCase):
     def test_bounded_summary_and_cache(self):
         id=self.create();client=FakeSummary();report=self.run_job(id,client)
         self.assertEqual(report['schema_version'],'report.v4');self.assertEqual(report['status'],'completed')
-        self.assertEqual(report['sample']['sent_count'],250);self.assertEqual(client.calls,1)
+        self.assertEqual(report['sample']['sent_count'],250);self.assertEqual(client.calls,2)
         self.assertNotIn('analysis',report);self.assertEqual(report['coverage']['fetched'],300)
-        self.run_job(id,client);self.assertEqual(client.calls,1)
+        self.run_job(id,client);self.assertEqual(client.calls,2)
         self.assertEqual(self.store.comments_page(id,None,None,0,30)['total'],300)
     def test_invalid_evidence_retries_once_raw_still_available(self):
         id=self.create();client=FakeSummary(True);r=self.run_job(id,client)
-        self.assertEqual(client.calls,2);self.assertEqual(r['summary_status'],'failed');self.assertEqual(r['topics'],[])
+        self.assertEqual(client.calls,3);self.assertEqual(r['summary_status'],'failed');self.assertEqual(r['topics'],[])
         self.assertEqual(self.store.comments_page(id,None,None,0,30)['total'],300)
     def test_sample_reproducible_and_char_limit(self):
         id=self.create(1000);state=self.store.get(id)
@@ -95,4 +99,4 @@ class LightweightTests(unittest.TestCase):
             def __init__(self):self.calls=0
             def ask(self,prompt):self.calls+=1;raise ValueError('最終回答が空です')
         client=Empty();r=self.run_job(self.create(),client)
-        self.assertEqual(client.calls,2);self.assertEqual(r['summary_status'],'failed')
+        self.assertEqual(client.calls,4);self.assertEqual(r['summary_status'],'failed')
