@@ -1,4 +1,3 @@
-import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,7 +32,7 @@ class JevTests(unittest.TestCase):
             state = self.store.get(run)
             self.assertEqual(state['topics'], [{'id': 'keep'}])
             self.assertEqual(state['status'], 'completed')
-            self.assertEqual(state['jev']['rows'][0]['tone'], 'unclear')
+            self.assertEqual(state['jev']['rows'][0]['tone'], 'positive')
             self.assertEqual(state['jev']['usage']['input_tokens'], 10000)
             self.store.queue(run, 'jev'); self.store.process(run, None, None)
             self.assertEqual(call.call_count, 100)
@@ -84,3 +83,23 @@ class JevTests(unittest.TestCase):
             self.assertEqual(other.get(run)['jev']['status'], 'stopped')
             other.queue(run, 'jev')
         finally: other.conn.close()
+
+    def test_neutral_mixed_and_uncertain_are_distinct(self):
+        for tone in ('neutral', 'mixed', 'very_positive', 'very_negative'):
+            raw = fake_response()
+            raw['answers']['tone'].update(choice=tone, confidence=0.9)
+            self.assertEqual(jev.validated(raw)['tone'], tone)
+        raw['answers']['tone']['confidence'] = 0.2
+        self.assertEqual(jev.validated(raw)['tone'], 'very_negative')
+        self.assertEqual(jev.validated(raw)['tone_raw'], 'very_negative')
+
+    def test_old_prompt_cache_not_reused(self):
+        run = self.create(1)
+        state = self.store.get(run)
+        state['jev_cache'] = {'old-schema': {'tone': 'positive'}}
+        self.store.save(state)
+        self.store.queue(run, 'jev')
+        with patch('backend.app.jev.evaluate', side_effect=fake_response) as call:
+            self.store.process(run, None, None)
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(self.store.get(run)['jev']['version'], 'sentiment-v2')

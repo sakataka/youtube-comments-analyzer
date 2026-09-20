@@ -365,3 +365,16 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .person-dictionary { display: grid; gap: 10px; margin-top: 16px; }
 .person-dictionary textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font: inherit; background: transparent; }
 .person-judgement { padding: 10px; border-left: 3px solid #9299a6; font-size: 13px; overflow-wrap: anywhere; }
+
+.jev-distribution { margin-block: 1.5rem; }
+.jev-bars { display: grid; gap: .5rem; }
+.jev-bar { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(3rem, 3fr) minmax(6rem, 1fr); align-items: center; gap: .75rem; text-align: left; padding: .65rem; border: 1px solid var(--border); border-radius: .5rem; background: transparent; color: inherit; cursor: pointer; }
+.jev-bar[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 1px; }
+.jev-track { display: block; height: .7rem; border-radius: .4rem; background: #8882; overflow: hidden; }
+.jev-track > span { display: block; height: 100%; background: #718096; }
+.jev-very_positive .jev-track > span { background: #19836b; }
+.jev-positive .jev-track > span { background: #51a795; }
+.jev-negative .jev-track > span { background: #db9551; }
+.jev-very_negative .jev-track > span { background: #c45c51; }
+.jev-mixed .jev-track > span { background: #9783b5; }
+@media (max-width: 520px) { .jev-bar { grid-template-columns: 1fr auto; gap: .35rem; } .jev-track { grid-row: 2; grid-column: 1 / -1; } }

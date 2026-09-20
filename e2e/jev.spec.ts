@@ -13,6 +13,11 @@ test('Jev分類を実行し種類で絞り込める・再実行はキャッシ�
   await expect(section.getByText('0件を表示', { exact: true })).toBeVisible();
   await section.getByLabel('Jevの種類').selectOption('question');
   await expect(section.locator('.opinion-original').first()).not.toBeEmpty();
+  await section.getByRole('button', { name: 'ややポジティブ', exact: false }).click();
+  await expect(section.getByLabel('Jevの論調')).toHaveValue('positive');
+  await section.getByLabel('分類したコメントを検索').fill('存在しない文字列123456789');
+  await expect(section.getByText('0件を表示', { exact: true })).toBeVisible();
+  await section.getByRole('button', { name: '分類の絞り込みを解除' }).click();
   const before = (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).jev.usage.calls;
   await section.getByRole('button', { name: 'Jevで分類する（最大100件）' }).click();
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).jev.cache_hits).toBeGreaterThan(0);
