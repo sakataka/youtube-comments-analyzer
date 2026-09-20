@@ -6,7 +6,7 @@ test('Jev分類を実行し種類で絞り込める・再実行はキャッシ�
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).status).toBe('completed');
   await page.goto(`/?run=${run_id}`);
   const section = page.getByRole('region', { name: 'Jevコメント分類' });
-  await section.getByRole('button', { name: 'Jevで分類する（最大100件）' }).click();
+  await section.getByRole('button', { name: 'Jevで分類する（最大500件）' }).click();
   await expect(section.getByRole('status')).toContainText('完了');
   await expect(section.locator('.opinion-original').first()).not.toBeEmpty();
   await section.getByLabel('Jevの種類').selectOption('request');
@@ -19,7 +19,7 @@ test('Jev分類を実行し種類で絞り込める・再実行はキャッシ�
   await expect(section.getByText('0件を表示', { exact: true })).toBeVisible();
   await section.getByRole('button', { name: '分類の絞り込みを解除' }).click();
   const before = (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).jev.usage.calls;
-  await section.getByRole('button', { name: 'Jevで分類する（最大100件）' }).click();
+  await section.getByRole('button', { name: 'Jevで分類する（最大500件）' }).click();
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).jev.cache_hits).toBeGreaterThan(0);
   const after = (await (await page.request.get(`/api/runs/${run_id}/report`)).json()).jev.usage.calls;
   expect(after).toBe(before);

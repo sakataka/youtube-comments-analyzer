@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -25,24 +27,25 @@ class JevTests(unittest.TestCase):
         self.store.save(state)
         return run
     def test_limit_cache_and_summary_preserved(self):
-        run = self.create(130)
+        run = self.create(530)
         with patch('backend.app.jev.evaluate', side_effect=fake_response) as call:
             self.store.queue(run, 'jev'); self.store.process(run, None, None)
-            self.assertEqual(call.call_count, 100)
+            self.assertEqual(call.call_count, 500)
             state = self.store.get(run)
             self.assertEqual(state['topics'], [{'id': 'keep'}])
             self.assertEqual(state['status'], 'completed')
             self.assertEqual(state['jev']['rows'][0]['tone'], 'positive')
-            self.assertEqual(state['jev']['usage']['input_tokens'], 10000)
+            self.assertEqual(state['jev']['usage']['input_tokens'], 50000)
             self.store.queue(run, 'jev'); self.store.process(run, None, None)
-            self.assertEqual(call.call_count, 100)
-            self.assertEqual(self.store.get(run)['jev']['cache_hits'], 100)
+            self.assertEqual(call.call_count, 500)
+            self.assertEqual(self.store.get(run)['jev']['cache_hits'], 500)
     def test_stop_preserves_completed_result_and_retry(self):
         run = self.create()
         def evaluate(*args, **kwargs):
             self.store.stop(run)
             return fake_response()
-        self.store.queue(run, 'jev'); jev.process(self.store, run, evaluate)
+        self.store.queue(run, 'jev')
+        with patch.object(jev, 'MAX_CONCURRENCY', 1): jev.process(self.store, run, evaluate)
         result = self.store.get(run)['jev']
         self.assertEqual(result['status'], 'stopped'); self.assertEqual(len(result['rows']), 1)
         self.store.queue(run, 'jev')
@@ -51,7 +54,7 @@ class JevTests(unittest.TestCase):
             self.assertEqual(call.call_count, 2)
     def test_invalid_response_keeps_prior_rows(self):
         run = self.create(); self.store.queue(run, 'jev')
-        with patch('backend.app.jev.evaluate', side_effect=[fake_response(), {'answers': {}}]):
+        with patch.object(jev, 'MAX_CONCURRENCY', 1), patch('backend.app.jev.evaluate', side_effect=[fake_response(), {'answers': {}}]):
             self.store.process(run, None, None)
         state = self.store.get(run)
         self.assertEqual(state['jev']['status'], 'failed'); self.assertEqual(len(state['jev']['rows']), 1)
@@ -103,3 +106,66 @@ class JevTests(unittest.TestCase):
             self.store.process(run, None, None)
         self.assertEqual(call.call_count, 1)
         self.assertEqual(self.store.get(run)['jev']['version'], 'sentiment-v2')
+
+    def test_top_500_selected_and_ordered(self):
+        run = self.create(505)
+        state = self.store.get(run)
+        for i, row in enumerate(state['comments']): row['like_count'] = i
+        self.store.save(state)
+        self.store.queue(run, 'jev'); jev.process(self.store, run, fake_response)
+        rows = self.store.get(run)['jev']['rows']
+        self.assertEqual([r['comment_id'] for r in rows], [str(i) for i in range(504, 4, -1)])
+
+    def test_ten_inflight_stop_drains_and_resume_uses_cache(self):
+        run = self.create(30)
+        barrier = threading.Barrier(10)
+        lock = threading.Lock()
+        active = peak = calls = 0
+        def evaluate(*args, **kwargs):
+            nonlocal active, peak, calls
+            with lock:
+                active += 1; calls += 1; peak = max(peak, active)
+            barrier.wait(timeout=5)
+            self.store.stop(run)
+            with lock: active -= 1
+            return fake_response()
+        self.store.queue(run, 'jev'); jev.process(self.store, run, evaluate)
+        result = self.store.get(run)['jev']
+        self.assertEqual((peak, calls), (10, 10))
+        self.assertEqual((result['status'], len(result['rows'])), ('stopped', 10))
+        self.store.queue(run, 'jev')
+        with patch('backend.app.jev.evaluate', side_effect=fake_response) as call:
+            jev.process(self.store, run)
+        self.assertEqual(call.call_count, 20)
+        self.assertEqual(self.store.get(run)['jev']['cache_hits'], 10)
+
+    def test_failure_drains_inflight_successes_without_more_requests(self):
+        run = self.create(30)
+        barrier = threading.Barrier(10)
+        lock = threading.Lock()
+        calls = 0
+        def evaluate(*args, **kwargs):
+            nonlocal calls
+            with lock:
+                calls += 1; number = calls
+            barrier.wait(timeout=5)
+            if number == 1: raise ValueError('HTTP 429')
+            time.sleep(0.05)
+            return fake_response()
+        self.store.queue(run, 'jev'); jev.process(self.store, run, evaluate)
+        result = self.store.get(run)['jev']
+        self.assertEqual(calls, 10)
+        self.assertEqual((result['status'], len(result['rows'])), ('failed', 9))
+        self.assertEqual(result['usage']['input_tokens'], 900)
+
+    def test_deadline_stops_new_requests_but_preserves_inflight(self):
+        run = self.create(30)
+        def evaluate(*args, **kwargs):
+            time.sleep(0.05)
+            return fake_response()
+        self.store.queue(run, 'jev')
+        with patch.object(jev, 'TIME_LIMIT_SECONDS', 0.02): jev.process(self.store, run, evaluate)
+        result = self.store.get(run)['jev']
+        self.assertEqual(result['status'], 'timed_out')
+        self.assertGreater(len(result['rows']), 0)
+        self.assertLessEqual(result['usage']['calls'], 10)

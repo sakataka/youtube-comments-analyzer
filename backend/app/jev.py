@@ -1,4 +1,5 @@
 """Optional, bounded Jev classification. No credentials or author identifiers in results."""
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import hashlib
 import json
 import math
@@ -10,7 +11,9 @@ from urllib.error import HTTPError, URLError
 from dotenv import dotenv_values
 
 MODEL = 'jev-1.13.0'
-MAX_COMMENTS = 100
+MAX_COMMENTS = 500
+MAX_CONCURRENCY = 10
+TIME_LIMIT_SECONDS = 300
 KINDS = {'question': '情報や説明を求める質問', 'request': '改善・変更・今後の内容への要望', 'reaction': '感想や評価', 'information': '情報の提供や補足', 'other': 'その他、分類が曖昧'}
 VERSION = 'sentiment-v2'
 TONES = {
@@ -72,37 +75,71 @@ def process(store, run_id, evaluator=None):
     result = state.setdefault('jev', {})
     usage = result.setdefault('usage', {'calls': 0, 'input_tokens': 0, 'output_tokens': 0})
     cache = state.setdefault('jev_cache', {})
-    rows = sorted(state['comments'], key=lambda row: hashlib.sha256(row['comment_id'].encode()).hexdigest())[:MAX_COMMENTS]
+    rows = sorted(state['comments'], key=lambda row: (-int(row.get('like_count') or 0), row['comment_id']))[:MAX_COMMENTS]
     lookup = {row['comment_id']: row for row in state['comments']}
-    result.update(status='running', error=None, total=len(rows), rows=[], cache_hits=0, model=MODEL, version=VERSION)
+    result.update(status='running', error=None, total=len(rows), rows=[], cache_hits=0, model=MODEL, version=VERSION, selection='likes_desc', concurrency=MAX_CONCURRENCY)
     state.update(status='running', stage='jev')
     store.save(state)
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + TIME_LIMIT_SECONDS
+    rank = {row['comment_id']: index for index, row in enumerate(rows)}
+
+    def save_item(row, item):
+        result['rows'].append({'comment_id': row['comment_id'], **item, 'truncated': len(row['text_original']) > 2000 or len(lookup.get(row.get('parent_comment_id'), {}).get('text_original', '')) > 1000})
+        result['rows'].sort(key=lambda item: rank[item['comment_id']])
+        store.save(state)
+
     try:
         key = api_key()
         if not key: raise ValueError('TYPESAFE_API_KEYを.envに設定してください。')
-        for row in rows:
-            if store.stopped(run_id):
-                result['status'] = 'stopped'; break
-            if time.monotonic() >= deadline:
-                result['status'] = 'timed_out'; break
-            body = payload(state, row, lookup)
-            cache_key = hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-            if cache_key in cache:
-                item = cache[cache_key]; result['cache_hits'] += 1
-            else:
-                usage['calls'] += 1
-                store.save(state)
-                raw = evaluator(body, key, timeout=min(20, max(0.1, deadline-time.monotonic())))
-                for field in ('input_tokens', 'output_tokens'):
-                    value = raw.get('usage', {}).get(field, 0)
-                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0: usage[field] += value
-                item = validated(raw)
-                cache[cache_key] = item
-            result['rows'].append({'comment_id': row['comment_id'], **item, 'truncated': len(row['text_original']) > 2000 or len(lookup.get(row.get('parent_comment_id'), {}).get('text_original', '')) > 1000})
-            store.save(state)
-        else:
-            result['status'] = 'completed'
+        # Workers only perform HTTP; this coordinator owns all state and SQLite writes.
+        with ThreadPoolExecutor(max_workers=MAX_CONCURRENCY) as executor:
+            pending = {}
+            active_keys = set()
+            index = 0
+            while index < len(rows) or pending:
+                if result['status'] == 'running':
+                    if store.stopped(run_id): result['status'] = 'stopped'
+                    elif time.monotonic() >= deadline: result['status'] = 'timed_out'
+                while result['status'] == 'running' and index < len(rows) and len(pending) < MAX_CONCURRENCY:
+                    if store.stopped(run_id):
+                        result['status'] = 'stopped'; break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        result['status'] = 'timed_out'; break
+                    row = rows[index]
+                    body = payload(state, row, lookup)
+                    cache_key = hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+                    # Identical inputs wait for the first result rather than being billed twice.
+                    if cache_key in active_keys: break
+                    index += 1
+                    if cache_key in cache:
+                        result['cache_hits'] += 1
+                        save_item(row, cache[cache_key])
+                    else:
+                        usage['calls'] += 1
+                        store.save(state)
+                        future = executor.submit(evaluator, body, key, timeout=min(20, remaining))
+                        pending[future] = (row, cache_key)
+                        active_keys.add(cache_key)
+                if not pending: break
+                done, _ = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                for future in done:
+                    row, cache_key = pending.pop(future)
+                    active_keys.remove(cache_key)
+                    try:
+                        raw = future.result()
+                        for field in ('input_tokens', 'output_tokens'):
+                            value = raw.get('usage', {}).get(field, 0)
+                            if isinstance(value, int) and not isinstance(value, bool) and value >= 0: usage[field] += value
+                        item = validated(raw)
+                        cache[cache_key] = item
+                        save_item(row, item)
+                    except Exception as exc:
+                        # Drain already sent work, preserving successes without scheduling more.
+                        result.update(status='failed', error=str(exc) if isinstance(exc, ValueError) else 'Jev分類に失敗しました。保存済み結果から再試行できます。')
+                        store.save(state)
+            if result['status'] == 'running':
+                result['status'] = 'stopped' if store.stopped(run_id) else 'completed'
     except ValueError as exc:
         result.update(status='failed', error=str(exc))
     except Exception:

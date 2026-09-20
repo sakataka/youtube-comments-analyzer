@@ -16,9 +16,10 @@ export function JevClassification({ result, running, working, action }: { result
   const filtered = rows.filter(row => (!kind || row.kind === kind) && (!tone || row.tone === tone) && row.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   return <section className="opinion-section" aria-label="Jevコメント分類">
     <div className="opinion-section-heading"><span>JEV / CLASSIFICATION</span><h2>YouTubeコメント分類器</h2></div>
-    <p>最大100件を固定抽出してJevで分類します。本文・返信先の文脈・動画タイトルをTypeSafeへ送信し、Jevの利用枠を消費します。投稿者名・IDは送信しません。</p>
+    <p>取得済みコメントのいいね上位500件を、最大10並列でJev分類します（最大5分）。本文・返信先の文脈・動画タイトルをTypeSafeへ送信し、Jevの利用枠を消費します。投稿者名・IDは送信しません。</p>
     {!result?.configured ? <p>TYPESAFE_API_KEYが未設定です。アプリの.envに設定すると利用できます。</p> : null}
-    <div className="opinion-actions"><Button disabled={working || running || !result?.configured} onClick={() => void action('actions', { action: 'jev' })}>Jevで分類する（最大100件）</Button></div>
+    <div className="opinion-actions"><Button disabled={working || running || !result?.configured} onClick={() => void action('actions', { action: 'jev' })}>Jevで分類する（最大500件）</Button></div>
+    {rows.length > 0 ? <p>{result?.selection === 'likes_desc' ? '対象：取得済みコメントのいいね上位500件まで' : '対象：以前の固定抽出コメント'}</p> : null}
     <p role="status">{statuses[result?.status ?? 'not_started']} · {rows.length} / {result?.total ?? 0}件</p>
     {result?.error ? <p role="alert">{result.error}</p> : null}
     {result?.usage ? <p>累計API呼び出し {result.usage.calls}回 · 入力 {result.usage.input_tokens} / 出力 {result.usage.output_tokens}トークン · 今回の再利用 {result.cache_hits ?? 0}件</p> : null}

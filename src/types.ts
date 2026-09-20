@@ -48,7 +48,7 @@ export type PersonStatistics = {
 };
 
 export type JevReport = {
-  configured: boolean; status: string; version?: string; error?: string; total?: number; cache_hits?: number;
+  configured: boolean; status: string; version?: string; selection?: string; error?: string; total?: number; cache_hits?: number;
   usage?: { calls: number; input_tokens: number; output_tokens: number };
   rows: Array<{ comment_id: string; kind: string; tone: string; kind_confidence: number; tone_confidence: number; truncated: boolean; text: string; url: string }>;
 };
