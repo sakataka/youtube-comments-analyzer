@@ -13,6 +13,7 @@ from .opinion_analysis import aggregate, digest
 from .opinion_fetch import fetch_round
 from .opinion_service import OpinionStore, now
 from . import person_statistics as people_rules
+from . import jev
 
 MODEL, EFFORT = 'gpt-6-astra', 'low'
 VERSION = 'sample-v1'
@@ -96,6 +97,7 @@ class LightweightStore(OpinionStore):
             if state.get('schema_version') == 'report.v4' and state['stage'] == 'interrupted':
                 if state.get('summary_status') in ('running','not_started'): state['summary_status'] = 'stopped'
                 if state.get('people_status') == 'running': state['people_status'] = 'stopped'
+                if state.get('jev', {}).get('status') == 'running': state['jev']['status'] = 'stopped'
                 self.save(state)
 
     def create(self, url, config, seed=None):
@@ -111,6 +113,13 @@ class LightweightStore(OpinionStore):
                 raise ValueError('旧方式の続行は終了しました。「新しい分析としてやり直す」で保存原文から軽量分析できます。')
             if any(json.loads(raw)['status'] in ('running','queued') for other_id, raw in self.conn.execute('select id,state_json from runs').fetchall() if other_id != run_id):
                 raise ValueError('別の分析を実行中です。完了するか停止してから開始してください。')
+            if action == 'jev':
+                current = self.get(run_id)
+                if not jev.api_key(): raise ValueError('TYPESAFE_API_KEYを.envに設定してください。')
+                if not current['comments']: raise ValueError('コメント取得後に実行してください。')
+                if current['status'] not in ('running', 'queued'):
+                    current.update(jev_previous_status=current['status'], jev_previous_stage=current['stage'], jev_previous_error=current.get('error_message'))
+                    self.save(current)
             super().queue(run_id,action)
             state = self.get(run_id)
             state['queued_at'] = now()
@@ -124,6 +133,7 @@ class LightweightStore(OpinionStore):
         counts = Counter(r['text_original'] for r in state['comments'])
         report.update(schema_version='report.v4', topics=state.get('topics',[]), summary_status=state.get('summary_status','not_started'), sample={k:v for k,v in state.get('sample',{}).items() if k!='items'}, attempts=state.get('attempts',[]), statistics={'likes':sum(int(r.get('like_count') or 0) for r in state['comments']), 'duplicate_comments':sum(n-1 for n in counts.values()), 'dated_comments':sum(bool(r.get('published_at')) for r in state['comments'])})
         report['person_statistics'] = {**{k:v for k,v in state.get('person_statistics',{}).items() if k != 'assignments'}, 'status':state.get('people_status','not_started'), 'source':state.get('people_source'), 'error':state.get('people_error')}
+        report['jev'] = jev.report(state)
         report['method'] = {'model':MODEL,'effort':EFFORT,'version':VERSION}
         for key in ('analysis','groups','targets','summary'):
             report.pop(key,None)
@@ -166,6 +176,8 @@ class LightweightStore(OpinionStore):
         state = self.get(run_id)
         if state.get('schema_version') != 'report.v4':
             raise ValueError('旧方式は実行できません。')
+        if state.get('pending_action') == 'jev':
+            return jev.process(self, run_id)
         started = time.monotonic()
         queued = datetime.fromisoformat(state.get('queued_at',now()))
         deadline = started + max(0,900-(datetime.now(timezone.utc)-queued).total_seconds())

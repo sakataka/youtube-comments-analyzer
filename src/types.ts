@@ -34,7 +34,7 @@ export type DataSummary = { run_count: number; total_bytes: number; runs: { byte
 export type RunState = { run_id: string; status: string; created_at: string; review_status: string; video: { title: string; channel_title: string; youtube_video_id: string }; fetch_summary: { max_comments_fetched: number } };
 
 export type LightReport = Omit<OpinionReport, 'schema_version' | 'analysis' | 'groups' | 'targets' | 'summary' | 'method'> & {
-  schema_version: 'report.v4'; summary_status: string; person_statistics?: PersonStatistics;
+  schema_version: 'report.v4'; summary_status: string; jev?: JevReport; person_statistics?: PersonStatistics;
   topics: Array<{ id: string; title: string; description: string; reactions: string; evidence: Array<{ comment_id: string; quote: string }> }>;
   sample: { candidate_count?: number; sent_count?: number; truncated_count?: number; reasons?: Record<string, number> };
   statistics: { likes: number; duplicate_comments: number; dated_comments: number };
@@ -45,4 +45,10 @@ export type PersonJudgement = { label: 'positive' | 'negative' | 'mixed' | 'uncl
 export type PersonStatistics = {
   status: string; source?: string; error?: string; denominator?: number; matched_comments?: number; unmatched_comments?: number;
   warnings?: string[]; people?: Array<{ id: string; name: string; aliases: string[]; count: number; rate: number; parents: number; replies: number; stances: Record<string, number>; stance_rates: Record<string, number> }>;
+};
+
+export type JevReport = {
+  configured: boolean; status: string; error?: string; total?: number; cache_hits?: number;
+  usage?: { calls: number; input_tokens: number; output_tokens: number };
+  rows: Array<{ comment_id: string; kind: string; tone: string; kind_confidence: number; tone_confidence: number; truncated: boolean; text: string; url: string }>;
 };

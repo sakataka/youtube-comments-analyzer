@@ -5,6 +5,7 @@ import { AppHeader } from './AppHeader';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { PersonStatisticsView, stanceLabels } from './PersonStatisticsView';
+import { JevClassification } from './JevClassification';
 import { toast } from 'sonner';
 
 const statuses: Record<string, string> = { not_started: '集計を準備しています', running: '抽出コメントを要約しています', completed: '抽出コメントの要約完了', failed: '要約を作成できませんでした', stopped: '停止して保存しました', timed_out: '時間枠に達したため保存しました' };
@@ -43,7 +44,7 @@ export function LightReportView({ report, error, working, action, onNewAnalysis,
     <header className="opinion-intro"><p className="opinion-eyebrow">COMMENT INSIGHTS · ASTRA LIGHT</p><h1>{report.video.title || 'コメントを取得しています'}</h1><p>{report.video.channel_title} · <a href={report.video.url} target="_blank" rel="noreferrer">YouTubeで動画を見る ↗</a></p></header>
     {error ? <p role="alert">{error}</p> : null}
     <section className="opinion-progress" aria-label="取得と要約の状況">
-      <strong aria-live="polite">{report.stage === 'queued' ? '順番待ち' : report.stage === 'fetching' && running ? 'コメントを取得しています' : report.stage === 'people' && running ? '人物名・別名を整理して全件を集計しています' : statuses[report.summary_status] || report.summary_status}</strong>
+      <strong aria-live="polite">{report.stage === 'jev' && running ? 'Jevでコメントを分類しています' : report.stage === 'queued' ? '順番待ち' : report.stage === 'fetching' && running ? 'コメントを取得しています' : report.stage === 'people' && running ? '人物名・別名を整理して全件を集計しています' : statuses[report.summary_status] || report.summary_status}</strong>
       <div className="opinion-metrics"><span><b>{formatNumber(report.coverage.fetched)}</b>件取得</span><span><b>{report.sample.sent_count ?? 0}</b>件を要約に使用</span><span><b>{report.usage.calls}</b>回のAI呼び出し</span></div>
       <p>全件の集計はAIを使わず、要約は抽出したコメントだけを読みます。要約と人物辞書に通常各1回、修復を含め最大4回です。処理全体は最大15分の時間枠で行います。</p>
       {report.error_message ? <p role="alert">{report.error_message} 取得済みの集計と原文は利用できます。</p> : null}
@@ -58,6 +59,7 @@ export function LightReportView({ report, error, working, action, onNewAnalysis,
       <p>{report.coverage.source === 'fixture' ? 'テスト用データです。実際の動画の反応ではありません。' : report.coverage.api_exhausted ? 'APIで取得可能な範囲を取得しました。削除・非公開コメントは含みません。' : '部分取得です。この範囲がコメント欄全体を代表するとは限りません。'}</p>
       <p className="opinion-note">投稿期間：{report.coverage.published_from ? new Date(report.coverage.published_from).toLocaleDateString() : '不明'} 〜 {report.coverage.published_to ? new Date(report.coverage.published_to).toLocaleDateString() : '不明'} ／ 投稿者ID確認済み {report.concentration.unique_authors}人。いいねは賛成票や人数ではありません。</p>
     </section>
+    <JevClassification key={report.run_id} result={report.jev} running={running} working={working} action={action} />
     <PersonStatisticsView statistics={report.person_statistics} running={running} working={working} action={action} onFilter={(id,label) => {setGroup('');setPerson(id);setStance(label);setSearch('');setOffset(0);document.getElementById('raw-comments')?.scrollIntoView({behavior:'smooth'});}} />
     <section className="opinion-section"><div className="opinion-section-heading"><span>03 / SAMPLED VOICES</span><h2>このコメント欄で語られていること</h2></div>
       <p>抽出範囲で確認した話題です。全体の賛否率や、少数意見の網羅を示すものではありません。</p>

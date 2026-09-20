@@ -40,7 +40,7 @@ class RunCreateRequest(RequestModel):
 
 
 class OpinionAction(RequestModel):
-    action: Literal['continue', 'stop', 'resume', 'people']
+    action: Literal['continue', 'stop', 'resume', 'people', 'jev']
 
 
 class TranscriptImport(RequestModel):
@@ -147,7 +147,7 @@ def get_report(run_id: str) -> dict[str, Any]:
 @app.get('/api/runs/{run_id}/export')
 def export_run(run_id: str) -> dict[str, Any]:
     state = opinion_store.get(run_id)
-    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache', 'people_cache')}
+    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache', 'people_cache', 'jev_cache')}
 
 
 @app.get('/api/runs/{run_id}/comments')
