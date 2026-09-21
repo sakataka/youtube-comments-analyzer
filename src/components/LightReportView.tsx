@@ -35,9 +35,14 @@ export function LightReportView({ report, error, working, action, onNewAnalysis,
     }, 150);
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [report.run_id, report.coverage.fetched, group, person, stance, search, sort, offset, report.coverage.updated_at]);
+  function goToSection(id: string) {
+    const heading = document.getElementById(id)?.querySelector('h2');
+    heading?.focus({ preventScroll: true });
+    heading?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+  }
   function filter(id: string) {
     setPerson(''); setStance(''); setGroup(id); setOffset(0); setSearch('');
-    document.getElementById('raw-comments')?.scrollIntoView({ behavior: 'smooth' });
+    goToSection('raw-comments');
   }
   return <main className="opinion-shell">
     <AppHeader report onHome={onNewAnalysis} onNewAnalysis={onNewAnalysis} onOpenSettings={onOpenSettings} />
@@ -54,24 +59,27 @@ export function LightReportView({ report, error, working, action, onNewAnalysis,
         <Button disabled={working} variant="outline" onClick={async () => { try { const result = await api<{run_id:string}>(`/api/runs/${report.run_id}/reanalyze`, {method:'POST'}); onOpenRun(result.run_id); } catch (e) { toast.error(String(e)); } }}>新しい分析としてやり直す</Button>
       </>}</div>
     </section>
-    <section className="opinion-section"><div className="opinion-section-heading"><span>01 / COUNTS</span><h2>取得した全件の集計</h2></div>
+    <nav className="report-section-nav" aria-label="分析結果のセクション">{[['report-counts', '全件集計'], ['report-jev', 'Jev分類'], ['report-people', '人物集計'], ['report-topics', '話題・要約'], ['raw-comments', '原文']].map(([id, label]) => <a key={id} href={`#${id}`} onClick={event => { event.preventDefault(); goToSection(id); }}>{label}</a>)}</nav>
+    <section id="report-counts" className="opinion-section"><div className="opinion-section-heading"><span>01 / COUNTS</span><h2 tabIndex={-1}>取得した全件の集計</h2></div>
       <div className="opinion-metrics"><span>親コメント <b>{report.coverage.parents}</b>件</span><span>返信 <b>{report.coverage.replies}</b>件</span><span>いいね合計 <b>{formatNumber(report.statistics.likes)}</b></span><span>完全同文の重複 <b>{report.statistics.duplicate_comments}</b>件</span></div>
       <p>{report.coverage.source === 'fixture' ? 'テスト用データです。実際の動画の反応ではありません。' : report.coverage.api_exhausted ? 'APIで取得可能な範囲を取得しました。削除・非公開コメントは含みません。' : '部分取得です。この範囲がコメント欄全体を代表するとは限りません。'}</p>
       <p className="opinion-note">投稿期間：{report.coverage.published_from ? new Date(report.coverage.published_from).toLocaleDateString() : '不明'} 〜 {report.coverage.published_to ? new Date(report.coverage.published_to).toLocaleDateString() : '不明'} ／ 投稿者ID確認済み {report.concentration.unique_authors}人。いいねは賛成票や人数ではありません。</p>
     </section>
     <JevClassification key={report.run_id} result={report.jev} running={running} working={working} action={action} />
-    <PersonStatisticsView statistics={report.person_statistics} running={running} working={working} action={action} onFilter={(id,label) => {setGroup('');setPerson(id);setStance(label);setSearch('');setOffset(0);document.getElementById('raw-comments')?.scrollIntoView({behavior:'smooth'});}} />
-    <section className="opinion-section"><div className="opinion-section-heading"><span>03 / SAMPLED VOICES</span><h2>このコメント欄で語られていること</h2></div>
+    <PersonStatisticsView statistics={report.person_statistics} running={running} working={working} action={action} onFilter={(id,label) => {setGroup('');setPerson(id);setStance(label);setSearch('');setOffset(0);goToSection('raw-comments');}} />
+    <section id="report-topics" className="opinion-section"><div className="opinion-section-heading"><span>03 / SAMPLED VOICES</span><h2 tabIndex={-1}>このコメント欄で語られていること</h2></div>
       <p>抽出範囲で確認した話題です。全体の賛否率や、少数意見の網羅を示すものではありません。</p>
       <div className="opinion-grid">{report.topics.map(topic => <article className="opinion-card" key={topic.id}><h3>{topic.title}</h3><p>{topic.description}</p><p>{topic.reactions}</p>{topic.evidence.map((e,i) => <blockquote key={`${e.comment_id}-${i}`}>{e.quote}</blockquote>)}<Button variant="outline" onClick={() => filter(topic.id)}>根拠の原文を読む</Button></article>)}</div>
       {!report.topics.length ? <p className="opinion-empty">{running ? '要約を待つ間も、下の原文を読めます。' : '表示できる要約はありません。取得済みの原文をご確認ください。'}</p> : null}
       {report.summary_status === 'completed' ? <Button variant="ghost" disabled={working || report.review.human_reviewed} onClick={() => void action('review/complete')}>{report.review.human_reviewed ? '抽出要約を確認済み' : '抽出要約を確認済みにする'}</Button> : null}
       <details><summary>抽出方法と処理時間</summary><p>候補 {report.sample.candidate_count ?? 0}件 ／ 送信 {report.sample.sent_count ?? 0}件 ／ 長文・親文脈の省略 {report.sample.truncated_count ?? 0}件。親・返信と投稿時期で分けた無作為抽出を中心に、高評価・返信の多い投稿を補足します。入力文字数上限による省略があります。</p><p>字幕は使用していません。{report.method.model} / {report.method.effort} · 累計 {Math.round(report.usage.elapsed_seconds)}秒 · 入力 {formatNumber(report.usage.input_characters)}文字 · 出力 {formatNumber(report.usage.output_characters)}文字</p></details>
     </section>
-    <section id="raw-comments" className="opinion-section"><div className="opinion-section-heading"><span>04 / ORIGINAL COMMENTS</span><h2>原文を読む</h2></div>
+    <section id="raw-comments" className="opinion-section"><div className="opinion-section-heading"><span>04 / ORIGINAL COMMENTS</span><h2 tabIndex={-1}>原文を読む</h2></div>
       <div className="opinion-actions"><Input aria-label="原文を検索" placeholder="原文を検索" value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} /><label>並べ替え <select aria-label="原文の並べ替え" value={sort} onChange={e => { setSort(e.target.value); setOffset(0); }}><option value="newest">新しい順</option><option value="likes">いいね順</option><option value="replies">返信の多い順</option></select></label>{group || person ? <Button variant="outline" onClick={() => filter('')}>すべての原文を表示</Button> : null}</div>
+      {group ? <p>絞り込み：{report.topics.find(topic => topic.id === group)?.title ?? '選択した話題'}</p> : null}
       {person ? <p>絞り込み：{report.person_statistics?.people?.find(p => p.id === person)?.name} {stance ? `／ ${stanceLabels[stance]}` : ''}</p> : null}
-      {pageError ? <p role="alert">{pageError}</p> : !page ? <p>原文を読み込み中…</p> : <><p>{page.total}件中 {page.total ? offset+1 : 0}〜{Math.min(offset+30,page.total)}件</p><div className="opinion-evidence-list">{page.comments.map(row => <article className="opinion-evidence-row" key={row.comment_id}><p className="opinion-note">{row.is_reply ? '返信' : '親コメント'} · いいね {row.like_count}</p>{row.parent_text ? <details><summary>返信先の文脈</summary><blockquote>{row.parent_text}</blockquote></details> : null}<p className="opinion-original">{row.text_original}</p>{person && row.person_judgements?.[person] ? <div className="person-judgement">参考判定：{stanceLabels[row.person_judgements[person].label]}<br />一致した呼び名：{row.person_judgements[person].aliases.join('、')}<br />{row.person_judgements[person].signals.length ? `評価表現：${row.person_judgements[person].signals.map(s => s.term).join('、')}` : '評価表現を確定できず'}{row.person_judgements[person].reasons.length ? <p>保留理由：{row.person_judgements[person].reasons.join('／')}</p> : null}</div> : null}<a href={row.url} target="_blank" rel="noreferrer">YouTubeのコメントを開く ↗</a></article>)}</div><div className="opinion-actions"><Button disabled={offset===0} variant="outline" onClick={() => setOffset(Math.max(0,offset-30))}>前へ</Button><Button disabled={offset+30>=page.total} variant="outline" onClick={() => setOffset(offset+30)}>次へ</Button></div></>}
+      <p role="status">{page ? `${page.total}件中 ${page.total ? offset+1 : 0}〜${Math.min(offset+30,page.total)}件` : pageError ? '原文を読み込めませんでした' : '原文を読み込み中…'}</p>
+      {pageError ? <p role="alert">{pageError}</p> : !page ? null : <><div className="opinion-evidence-list">{page.comments.map(row => <article className="opinion-evidence-row" key={row.comment_id}><p className="opinion-note">{row.is_reply ? '返信' : '親コメント'} · いいね {row.like_count}</p>{row.parent_text ? <details><summary>返信先の文脈</summary><blockquote>{row.parent_text}</blockquote></details> : null}<p className="opinion-original">{row.text_original}</p>{person && row.person_judgements?.[person] ? <div className="person-judgement">参考判定：{stanceLabels[row.person_judgements[person].label]}<br />一致した呼び名：{row.person_judgements[person].aliases.join('、')}<br />{row.person_judgements[person].signals.length ? `評価表現：${row.person_judgements[person].signals.map(s => s.term).join('、')}` : '評価表現を確定できず'}{row.person_judgements[person].reasons.length ? <p>保留理由：{row.person_judgements[person].reasons.join('／')}</p> : null}</div> : null}<a href={row.url} target="_blank" rel="noreferrer">YouTubeのコメントを開く ↗</a></article>)}</div><div className="opinion-actions"><Button disabled={offset===0} variant="outline" onClick={() => setOffset(Math.max(0,offset-30))}>前へ</Button><Button disabled={offset+30>=page.total} variant="outline" onClick={() => setOffset(offset+30)}>次へ</Button></div></>}
     </section>
   </main>;
 }

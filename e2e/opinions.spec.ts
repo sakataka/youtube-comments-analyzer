@@ -10,7 +10,22 @@ test('v4 集計と抽出要約から原文を検索できる', async ({ page }, 
   await expect(page.getByText('抽出コメントの要約完了', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '取得した全件の集計' })).toBeVisible();
   await expect(page.getByText('テスト用データです。実際の動画の反応ではありません。')).toBeVisible();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const navigation = page.getByRole('navigation', { name: '分析結果のセクション' });
+  for (const [label, heading] of [['全件集計', '取得した全件の集計'], ['Jev分類', 'YouTubeコメント分類器'], ['人物集計', '誰について語られているか'], ['話題・要約', 'このコメント欄で語られていること'], ['原文', '原文を読む']]) {
+    await navigation.getByRole('link', { name: label, exact: true }).click();
+    const target = page.getByRole('heading', { name: heading, exact: true });
+    await expect(target).toBeFocused();
+    const menuBox = await navigation.boundingBox();
+    const headingBox = await target.boundingBox();
+    expect(headingBox!.y).toBeGreaterThanOrEqual(menuBox!.y + menuBox!.height);
+  }
+  const topicTitle = await page.locator('.opinion-card h3').first().innerText();
   await page.getByRole('button', { name: '根拠の原文を読む' }).first().click();
+  await expect(page.getByRole('heading', { name: '原文を読む', exact: true })).toBeFocused();
+  await expect(page.getByText(`絞り込み：${topicTitle}`, { exact: true })).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('原文を検索', { exact: true })).toBeFocused();
   await expect(page.locator('.opinion-original').first()).not.toBeEmpty();
   await expect(page.getByRole('link', {name:'YouTubeのコメントを開く ↗'}).first()).toHaveAttribute('href', /&lc=/);
   await page.getByLabel('原文を検索', {exact:true}).fill('絶対に存在しない検索語');

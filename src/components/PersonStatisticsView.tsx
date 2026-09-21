@@ -10,8 +10,8 @@ export function PersonStatisticsView({ statistics, running, working, action, onF
   const [draft,setDraft]=useState('');
   const [error,setError]=useState('');
   const stats=statistics;
-  return <section className="opinion-section" aria-label="人物別の言及と評価">
-    <div className="opinion-section-heading"><span>02 / PEOPLE</span><h2>誰について語られているか</h2></div>
+  return <section id="report-people" className="opinion-section" aria-label="人物別の言及と評価">
+    <div className="opinion-section-heading"><span>02 / PEOPLE</span><h2 tabIndex={-1}>誰について語られているか</h2></div>
     <p>名前・別名の辞書に一致した投稿を、取得した全件から集計しています。同じ投稿で同じ人物が繰り返し登場しても1件です。</p>
     {stats?.status === 'running' ? <p role="status">人物名・別名の辞書を作成し、全件を集計しています…</p> : null}
     {stats?.error ? <p role="alert">人物集計：{stats.error} 要約と原文は引き続き利用できます。</p> : null}

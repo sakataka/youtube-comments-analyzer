@@ -14,8 +14,8 @@ export function JevClassification({ result, running, working, action }: { result
   function selectTone(value: string) { setTone(value); setVisibleCount(20); }
   const rows = result?.rows ?? [];
   const filtered = rows.filter(row => (!kind || row.kind === kind) && (!tone || row.tone === tone) && row.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-  return <section className="opinion-section" aria-label="Jevコメント分類">
-    <div className="opinion-section-heading"><span>JEV / CLASSIFICATION</span><h2>YouTubeコメント分類器</h2></div>
+  return <section id="report-jev" className="opinion-section" aria-label="Jevコメント分類">
+    <div className="opinion-section-heading"><span>JEV / CLASSIFICATION</span><h2 tabIndex={-1}>YouTubeコメント分類器</h2></div>
     <p>取得済みコメントのいいね上位500件を、最大10並列でJev分類します（最大5分）。本文・返信先の文脈・動画タイトルをTypeSafeへ送信し、Jevの利用枠を消費します。投稿者名・IDは送信しません。</p>
     {!result?.configured ? <p>TYPESAFE_API_KEYが未設定です。アプリの.envに設定すると利用できます。</p> : null}
     <div className="opinion-actions"><Button disabled={working || running || !result?.configured} onClick={() => void action('actions', { action: 'jev' })}>Jevで分類する（最大500件）</Button></div>
@@ -39,6 +39,6 @@ export function JevClassification({ result, running, working, action }: { result
       <label>論調 <select aria-label="Jevの論調" value={tone} onChange={e => selectTone(e.target.value)}><option value="">すべて</option>{Object.entries(tones).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
     <label>本文検索 <input aria-label="分類したコメントを検索" value={search} onChange={e => { setSearch(e.target.value); setVisibleCount(20); }} /></label>
       {tone || kind || search ? <Button variant="outline" onClick={() => { setTone(''); setKind(''); setSearch(''); setVisibleCount(20); }}>分類の絞り込みを解除</Button> : null}
-    </div><p>{filtered.length}件を表示</p><div className="opinion-evidence-list">{filtered.slice(0, visibleCount).map(row => <article className="opinion-evidence-row" key={row.comment_id}><p>{kinds[row.kind]} · {legacy ? ({positive: '肯定的（旧分類）', negative: '否定的（旧分類）', mixed: '賛否が混在', unclear: '中立・判定不明（旧分類）'}[row.tone] ?? row.tone) : tones[row.tone]}{!legacy && row.tone_confidence < 0.7 ? ' · 暫定' : ''}{row.truncated ? ' · 長文を省略して判定' : ''}</p><p className="opinion-original">{row.text}</p><details><summary>判定の確かさ</summary><p>評価分類の確信度：{Math.round(row.tone_confidence * 100)}%。正答率ではありません。70%未満は暫定候補です。評価の強さとは異なります。</p></details><a href={row.url} target="_blank" rel="noreferrer">分類した原文をYouTubeで開く ↗</a></article>)}</div>{filtered.length > visibleCount ? <Button variant="outline" onClick={() => setVisibleCount(value => value + 20)}>さらに20件表示</Button> : null}</> : null}
+    </div><p role="status">{filtered.length}件中 {Math.min(visibleCount, filtered.length)}件を表示</p><div className="opinion-evidence-list">{filtered.slice(0, visibleCount).map(row => <article className="opinion-evidence-row" key={row.comment_id}><p>{kinds[row.kind]} · {legacy ? ({positive: '肯定的（旧分類）', negative: '否定的（旧分類）', mixed: '賛否が混在', unclear: '中立・判定不明（旧分類）'}[row.tone] ?? row.tone) : tones[row.tone]}{!legacy && row.tone_confidence < 0.7 ? ' · 暫定' : ''}{row.truncated ? ' · 長文を省略して判定' : ''}</p><p className="opinion-original">{row.text}</p><details><summary>判定の確かさ</summary><p>評価分類の確信度：{Math.round(row.tone_confidence * 100)}%。正答率ではありません。70%未満は暫定候補です。評価の強さとは異なります。</p></details><a href={row.url} target="_blank" rel="noreferrer">分類した原文をYouTubeで開く ↗</a></article>)}</div>{filtered.length > visibleCount ? <Button variant="outline" onClick={() => setVisibleCount(value => value + 20)}>さらに20件表示</Button> : null}</> : null}
   </section>;
 }

@@ -378,3 +378,8 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .jev-very_negative .jev-track > span { background: #c45c51; }
 .jev-mixed .jev-track > span { background: #9783b5; }
 @media (max-width: 520px) { .jev-bar { grid-template-columns: 1fr auto; gap: .35rem; } .jev-track { grid-row: 2; grid-column: 1 / -1; } }
+
+.report-section-nav { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 4px 8px; padding: 8px 0; background: var(--background); border-bottom: 1px solid var(--border); }
+.report-section-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 10px; color: var(--primary); font-size: .875rem; text-decoration: underline; text-underline-offset: 4px; }
+.opinion-section h2[tabindex] { scroll-margin-top: 140px; }
+.opinion-section h2[tabindex]:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
