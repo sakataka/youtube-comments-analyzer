@@ -1,0 +1,403 @@
+[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "src/styles.css",
+    "line": 285,
+    "snippet": "border-left: 2px solid var(--border)",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "overused-font",
+    "name": "Overused font",
+    "description": "Inter, Roboto, Fraunces, Geist, Plus Jakarta Sans, and Space Grotesk are used on so many sites they no longer feel distinctive. Each new wave of AI-generated UIs converges on the same handful of faces. Choose a face that gives your interface personality.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "src/styles.css",
+    "line": 44,
+    "snippet": "font-family: Inter",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 99,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 102,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 123,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 274,
+    "snippet": "border-radius: 20px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "20px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 275,
+    "snippet": "Undocumented color #187751 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#187751",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 275,
+    "snippet": "Undocumented color #e8f5ee is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#e8f5ee",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 276,
+    "snippet": "Undocumented color #a1453d is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#a1453d",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 276,
+    "snippet": "Undocumented color #fff0ee is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#fff0ee",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 283,
+    "snippet": "border-radius: 2px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "2px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 344,
+    "snippet": "border-radius: 4px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "4px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 357,
+    "snippet": "Undocumented color #9299a633 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#9299a633",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 357,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 358,
+    "snippet": "Undocumented color #34866a is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#34866a",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 359,
+    "snippet": "Undocumented color #c66755 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#c66755",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 360,
+    "snippet": "Undocumented color #b38a35 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#b38a35",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 361,
+    "snippet": "Undocumented color #9299a6 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#9299a6",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 367,
+    "snippet": "Undocumented color #9299a6 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#9299a6",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 373,
+    "snippet": "Undocumented color #8882 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#8882",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 373,
+    "snippet": "border-radius: .4rem is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": ".4rem",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 374,
+    "snippet": "Undocumented color #718096 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#718096",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 375,
+    "snippet": "Undocumented color #19836b is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#19836b",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 376,
+    "snippet": "Undocumented color #51a795 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#51a795",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 377,
+    "snippet": "Undocumented color #db9551 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#db9551",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 378,
+    "snippet": "Undocumented color #c45c51 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#c45c51",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "src/styles.css",
+    "line": 379,
+    "snippet": "Undocumented color #9783b5 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#9783b5",
+    "importedBy": [
+      "main.tsx"
+    ]
+  }
+]

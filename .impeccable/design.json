@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-21T08:41:35.962103+00:00",
+  "title": "Design System: YouTube コメントインサイト",
+  "extensions": {
+    "motion": [
+      {
+        "name": "controls",
+        "value": "100ms ease-out",
+        "purpose": "共通ボタンの色・背景・境界・opacity"
+      },
+      {
+        "name": "surface",
+        "value": "120ms ease-out",
+        "purpose": "body・詳細設定の色変化"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "start-compact",
+        "value": "980px"
+      },
+      {
+        "name": "single-column",
+        "value": "650px"
+      },
+      {
+        "name": "jev-bar-stack",
+        "value": "520px"
+      }
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "overview": "個人用の情報密度が高い分析ツール。操作速度、根拠原文への到達、状態の明確さを優先し、派手なSaaS化は行わない。",
+    "keyCharacteristics": [
+      "デスクトップ・420×912px・ダークモードを維持",
+      "白・グレー・青と標準的な操作",
+      "既存実装の記録。UI変更の承認ではない"
+    ]
+  }
+}
