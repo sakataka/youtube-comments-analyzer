@@ -6,7 +6,7 @@ test('設定はフォーカスを管理し、旧感情モデル設定を表示�
   await button.click();
   const dialog = page.getByRole('dialog', { name: '設定とデータ' });
   await expect(dialog.getByRole('button', { name: '閉じる' })).toBeFocused();
-  await expect(dialog).toContainText('gpt-6-astra');
+  await expect(dialog).toContainText('gpt-6-sol');
   await expect(dialog).not.toContainText('ローカル感情モデル');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();

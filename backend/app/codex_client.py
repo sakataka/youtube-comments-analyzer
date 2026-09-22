@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-CODEX_MODEL = "gpt-6-astra"
+CODEX_MODEL = "gpt-6-sol"
 CODEX_REASONING_EFFORT = "medium"
 
 

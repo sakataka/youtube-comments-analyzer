@@ -15,7 +15,7 @@ from .opinion_service import OpinionStore, now
 from . import person_statistics as people_rules
 from . import jev
 
-MODEL, EFFORT = 'gpt-6-astra', 'low'
+MODEL, EFFORT = 'gpt-6-sol', 'medium'
 VERSION = 'sample-v1'
 
 class Strict(BaseModel):

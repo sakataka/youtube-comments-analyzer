@@ -1,6 +1,6 @@
 # 動作確認と復旧
 
-`GET /api/health`が`report_schema: report.v4`、`GET /api/settings`が`gpt-6-astra` / `low`を返すことを確認します。画面とAPIが食い違う場合はビルド後にこのアプリのAPIサービスだけを再起動します。
+`GET /api/health`が`report_schema: report.v4`、`GET /api/settings`が`gpt-6-sol` / `medium`を返すことを確認します。画面とAPIが食い違う場合はビルド後にこのアプリのAPIサービスだけを再起動します。
 
 - **キー未設定**：`.env`の`YOUTUBE_API_KEY`を設定し再起動します。実URLをfixtureで代用しません。
 - **AI失敗・利用制限**：集計・原文は引き続き利用できます。ログインと利用状態を確認し、必要なら「保存データから要約を再試行」を押します。試行回数と時間は履歴に残ります。
