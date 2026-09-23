@@ -39,7 +39,7 @@ cp .env.example .env
 bun run dev
 ```
 
-LocalWebは`dist/`を配信し、`/api`をポート8000へ接続します。
+LocalWebは`dist/`を配信し、`/api`をLocalWebが割り当てたportのAPIへ接続します（port番号は`apps.json`で管理し、この repo には書きません）。
 
 ## 保存と互換性
 
