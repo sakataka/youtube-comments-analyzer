@@ -40,7 +40,7 @@ class RunCreateRequest(RequestModel):
 
 
 class OpinionAction(RequestModel):
-    action: Literal['continue', 'stop', 'resume', 'people', 'jev']
+    action: Literal['continue', 'stop', 'resume', 'people', 'jev', 'local', 'x']
 
 
 class TranscriptImport(RequestModel):
@@ -115,9 +115,30 @@ def data_actions(request: DataAction) -> dict[str, Any]:
     return {'status': 'completed'}
 
 
+def run_job(run_id: str, action: str) -> None:
+    opinion_store.process(run_id, youtube_client, lambda *_: None)
+    if action in ('fetch', 'resume', 'continue', 'people'):
+        follow_up(run_id)
+
+
+def follow_up(run_id: str) -> None:
+    """After the main analysis, run token-free local models and, once per run, the X search."""
+    for action in ('local', 'x'):
+        state = opinion_store.get(run_id)
+        if opinion_store.stopped(run_id) or not state['comments'] or state['status'] in ('running', 'queued'):
+            return
+        if action == 'x' and state.get('x_pulse', {}).get('status') in ('completed', 'failed'):
+            continue
+        try:
+            opinion_store.queue(run_id, action)
+        except ValueError:
+            continue  # disabled or unavailable; the main result stays usable
+        opinion_store.process(run_id, youtube_client, lambda *_: None)
+
+
 def enqueue_opinion(run_id: str, action: str) -> dict[str, str]:
     opinion_store.queue(run_id, action)
-    job_executor.submit(opinion_store.process, run_id, youtube_client, lambda *_: None)
+    job_executor.submit(run_job, run_id, action)
     return {'run_id': run_id, 'status': 'queued'}
 
 
@@ -147,13 +168,13 @@ def get_report(run_id: str) -> dict[str, Any]:
 @app.get('/api/runs/{run_id}/export')
 def export_run(run_id: str) -> dict[str, Any]:
     state = opinion_store.get(run_id)
-    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache', 'people_cache', 'jev_cache')}
+    return {key: value for key, value in state.items() if key not in ('ai_cache', 'last_ai_key', 'summary_cache', 'people_cache', 'jev_cache', 'local_cache')}
 
 
 @app.get('/api/runs/{run_id}/comments')
-def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest', person_id: str | None = None, stance: Literal['positive','negative','mixed','unclear'] | None = None, moment_start: int | None = Query(default=None, ge=0), moment_end: int | None = Query(default=None, ge=1)) -> dict[str, Any]:
+def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest', person_id: str | None = None, stance: Literal['positive','negative','mixed','unclear'] | None = None, moment_start: int | None = Query(default=None, ge=0), moment_end: int | None = Query(default=None, ge=1), sentiment: Literal['positive','neutral','negative'] | None = None, emotion: Literal['joy','sadness','anticipation','surprise','anger','fear','disgust','trust','none'] | None = None, model_stance: Literal['positive','neutral','negative','mixed','unclear'] | None = None) -> dict[str, Any]:
     moment = (moment_start, moment_end) if moment_start is not None and moment_end is not None else None
-    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort, person_id, stance, moment)
+    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort, person_id, stance, moment, sentiment, emotion, model_stance)
 
 
 @app.post('/api/runs/{run_id}/actions')
@@ -196,4 +217,11 @@ def reanalyze_opinions(run_id: str) -> dict[str, Any]:
 
 @app.post('/api/runs/{run_id}/people')
 def update_people(run_id: str, request: ManualDictionary) -> dict[str, Any]:
-    return opinion_store.update_people(run_id, [p.model_dump() for p in request.people])
+    report = opinion_store.update_people(run_id, [p.model_dump() for p in request.people])
+    if report.get('local', {}).get('status') == 'completed':
+        try:
+            enqueue_opinion(run_id, 'local')  # person-level model labels follow the edited dictionary
+            report = opinion_store.report(run_id)
+        except ValueError:
+            pass
+    return report

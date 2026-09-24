@@ -1,15 +1,21 @@
 import { useState } from 'react';
-import type { PersonStatistics } from '../types';
+import type { LocalReport, PersonStatistics } from '../types';
+import { modelStanceLabels } from './ToneEmotionView';
 import { Button } from './ui/button';
 
 export const stanceLabels: Record<string,string> = {positive:'肯定',negative:'否定',mixed:'両方',unclear:'判定できず'};
 const percent = (value: number) => `${(value*100).toFixed(1)}%`;
 
-export function PersonStatisticsView({ statistics, running, working, action, onFilter }: { statistics?: PersonStatistics; running:boolean; working:boolean; action:(path:string,body?:unknown)=>Promise<boolean|undefined>; onFilter:(id:string,stance:string)=>void }) {
+export function PersonStatisticsView({ statistics, local, running, working, action, onFilter, onFilterModel }: { statistics?: PersonStatistics; local?: LocalReport; running:boolean; working:boolean; action:(path:string,body?:unknown)=>Promise<boolean|undefined>; onFilter:(id:string,stance:string)=>void; onFilterModel:(id:string,stance:string)=>void }) {
   const [editing,setEditing]=useState(false);
   const [draft,setDraft]=useState('');
   const [error,setError]=useState('');
   const stats=statistics;
+  const model=local?.status === 'completed' ? local.people : undefined;
+  const ruleStances=(person: NonNullable<PersonStatistics['people']>[number]) => <>
+    <div className="person-stance-bar" aria-label={`${person.name}の参考評価の内訳`}>{Object.keys(stanceLabels).map(key => <span key={key} className={`person-stance-${key}`} style={{width:percent(person.stance_rates[key])}} title={`${stanceLabels[key]} ${person.stances[key]}件`} />)}</div>
+    <div className="person-stance-counts">{Object.entries(stanceLabels).map(([key,label]) => <Button key={key} variant="outline" disabled={!person.stances[key]} onClick={() => onFilter(person.id,key)}><i className={`person-stance-dot person-stance-${key}`} />{label} {person.stances[key]}件 <small>{percent(person.stance_rates[key])}</small></Button>)}</div>
+  </>;
   return <section id="report-people" className="opinion-section" aria-label="人物別の言及と評価">
     <div className="opinion-section-heading"><span>02 / PEOPLE</span><h2 tabIndex={-1}>誰について語られているか</h2></div>
     <p>名前・別名の辞書に一致した投稿を、取得した全件から集計しています。同じ投稿で同じ人物が繰り返し登場しても1件です。</p>
@@ -17,13 +23,16 @@ export function PersonStatisticsView({ statistics, running, working, action, onF
     {stats?.error ? <p role="alert">人物集計：{stats.error} 要約と原文は引き続き利用できます。</p> : null}
     {stats?.status === 'completed' ? <>
       <p className="opinion-note">分母：取得 {stats.denominator}件 ／ 辞書に一致 {stats.matched_comments}件 ／ 辞書未一致 {stats.unmatched_comments}件。複数人物への言及があるため、人物別の割合の合計は100%を超える場合があります。</p>
-      <p className="opinion-note">肯定・否定はルールによる参考値です。4区分の分母はその人物に一致した投稿全件。「判定できず」は中立という意味ではありません。</p>
+      <p className="opinion-note">{model ? '肯定・中立・否定は、名前を含む文をローカルモデルで判定した参考値です。文ごとの判定が肯定と否定に分かれた投稿は「両方」。分母はその人物に一致した投稿全件です。' : '肯定・否定はルールによる参考値です。4区分の分母はその人物に一致した投稿全件。「判定できず」は中立という意味ではありません。'}</p>
       {!stats.people?.length ? <p>登録された人物はありません。辞書に人物名・呼び名を追加できます。</p> : null}
       <div className="person-statistics">{stats.people?.map(person => <article className="person-stat-card" key={person.id}>
         <div className="person-stat-heading"><h3>{person.name}</h3><Button variant="ghost" onClick={() => onFilter(person.id,'')}>{person.count}件 · 全件の{percent(person.rate)}</Button></div>
         <p className="opinion-note">親 {person.parents}件 ／ 返信 {person.replies}件 · 呼び名：{person.aliases.join('、') || '有効な呼び名なし'}</p>
-        <div className="person-stance-bar" aria-label={`${person.name}の参考評価の内訳`}>{Object.keys(stanceLabels).map(key => <span key={key} className={`person-stance-${key}`} style={{width:percent(person.stance_rates[key])}} title={`${stanceLabels[key]} ${person.stances[key]}件`} />)}</div>
-        <div className="person-stance-counts">{Object.entries(stanceLabels).map(([key,label]) => <Button key={key} variant="outline" disabled={!person.stances[key]} onClick={() => onFilter(person.id,key)}><i className={`person-stance-dot person-stance-${key}`} />{label} {person.stances[key]}件 <small>{percent(person.stance_rates[key])}</small></Button>)}</div>
+        {model?.[person.id] ? <>
+          <div className="person-stance-bar" aria-label={`${person.name}へのモデル判定の内訳`}>{Object.keys(modelStanceLabels).map(key => <span key={key} className={`person-model-${key}`} style={{width:percent((model[person.id][key] ?? 0)/Math.max(1,person.count))}} title={`${modelStanceLabels[key]} ${model[person.id][key] ?? 0}件`} />)}</div>
+          <div className="person-stance-counts">{Object.entries(modelStanceLabels).filter(([key]) => key !== 'unclear' || model[person.id][key]).map(([key,label]) => <Button key={key} variant="outline" disabled={!model[person.id][key]} onClick={() => onFilterModel(person.id,key)}><i className={`person-stance-dot person-model-${key}`} />{label} {model[person.id][key] ?? 0}件 <small>{percent((model[person.id][key] ?? 0)/Math.max(1,person.count))}</small></Button>)}</div>
+        </> : null}
+        {model?.[person.id] ? <details><summary>ルールによる判定を見る</summary>{ruleStances(person)}</details> : ruleStances(person)}
       </article>)}</div>
     </> : !running ? <p>人物集計はまだ完了していません。保存済みの原文から追加できます。</p> : null}
     {stats?.warnings?.map((warning,i) => <p className="opinion-note" key={i}>{warning}</p>)}

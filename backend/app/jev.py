@@ -66,12 +66,14 @@ def validated(raw):
         result[name + '_confidence'] = confidence
     return result
 
+def restore_previous(state):
+    """Side jobs (Jev, local models, X) leave the run's own status as it was before queueing."""
+    return state.pop('previous_status', 'paused'), state.pop('previous_stage', 'saved'), state.pop('previous_error', None)
+
 def process(store, run_id, evaluator=None):
     evaluator = evaluator or evaluate
     state = store.get(run_id)
-    previous_status = state.pop('jev_previous_status', 'paused')
-    previous_stage = state.pop('jev_previous_stage', 'saved')
-    previous_error = state.pop('jev_previous_error', None)
+    previous_status, previous_stage, previous_error = restore_previous(state)
     result = state.setdefault('jev', {})
     usage = result.setdefault('usage', {'calls': 0, 'input_tokens': 0, 'output_tokens': 0})
     cache = state.setdefault('jev_cache', {})

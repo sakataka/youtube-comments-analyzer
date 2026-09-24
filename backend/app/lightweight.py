@@ -1,11 +1,12 @@
 """Bounded sample summaries; all raw comments remain independently usable."""
 from __future__ import annotations
 
+import copy
 import json
 import random
 import time
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel, ConfigDict, Field
 from .codex_client import CodexAppServerClient, parse_json_object
@@ -15,8 +16,11 @@ from .opinion_service import OpinionStore, now
 from . import person_statistics as people_rules
 from . import jev
 from . import insights
+from . import local_models
+from . import x_pulse
 
 MODEL, EFFORT = 'gpt-6-sol', 'medium'
+SIDE_JOBS = ('jev', 'local', 'x')
 VERSION = 'sample-v1'
 
 class Strict(BaseModel):
@@ -98,13 +102,19 @@ class LightweightStore(OpinionStore):
             if state.get('schema_version') == 'report.v4' and state['stage'] == 'interrupted':
                 if state.get('summary_status') in ('running','not_started'): state['summary_status'] = 'stopped'
                 if state.get('people_status') == 'running': state['people_status'] = 'stopped'
-                if state.get('jev', {}).get('status') == 'running': state['jev']['status'] = 'stopped'
+                for side in ('jev', 'local', 'x_pulse'):
+                    if state.get(side, {}).get('status') == 'running': state[side]['status'] = 'stopped'
                 self.save(state)
 
     def create(self, url, config, seed=None):
         run_id = super().create(url,config,seed)
         state = self.get(run_id)
         state.update(schema_version='report.v4', summary_status='not_started', topics=[], sample={}, attempts=[], summary_cache=(seed or {}).get('summary_cache', {}), people_status='not_started', people_cache=(seed or {}).get('people_cache', {}), people_dictionary=(seed or {}).get('people_dictionary') if (seed or {}).get('people_source') == 'manual' else None, people_source='manual' if (seed or {}).get('people_source') == 'manual' else None)
+        # Token-free and quota-bound side results carry over to a re-analysis of the same video.
+        state['local_cache'] = copy.deepcopy((seed or {}).get('local_cache', {}))
+        pulse = (seed or {}).get('x_pulse', {})
+        if pulse.get('status') == 'completed' and datetime.now(timezone.utc) - datetime.fromisoformat(pulse['observed_at']) < timedelta(hours=24):
+            state['x_pulse'] = copy.deepcopy(pulse)
         self.save(state)
         return run_id
 
@@ -114,12 +124,14 @@ class LightweightStore(OpinionStore):
                 raise ValueError('旧方式の続行は終了しました。「新しい分析としてやり直す」で保存原文から軽量分析できます。')
             if any(json.loads(raw)['status'] in ('running','queued') for other_id, raw in self.conn.execute('select id,state_json from runs').fetchall() if other_id != run_id):
                 raise ValueError('別の分析を実行中です。完了するか停止してから開始してください。')
-            if action == 'jev':
+            if action in SIDE_JOBS:
                 current = self.get(run_id)
-                if not jev.api_key(): raise ValueError('TYPESAFE_API_KEYを.envに設定してください。')
+                if action == 'jev' and not jev.api_key(): raise ValueError('TYPESAFE_API_KEYを.envに設定してください。')
+                if action == 'local' and not local_models.enabled(): raise ValueError('LOCAL_MODELS=off のためローカル分析は無効です。')
+                if action == 'x' and not x_pulse.report(current)['enabled']: raise ValueError('X検索は無効か、Grok CLIが見つかりません。')
                 if not current['comments']: raise ValueError('コメント取得後に実行してください。')
                 if current['status'] not in ('running', 'queued'):
-                    current.update(jev_previous_status=current['status'], jev_previous_stage=current['stage'], jev_previous_error=current.get('error_message'))
+                    current.update(previous_status=current['status'], previous_stage=current['stage'], previous_error=current.get('error_message'))
                     self.save(current)
             super().queue(run_id,action)
             state = self.get(run_id)
@@ -136,6 +148,8 @@ class LightweightStore(OpinionStore):
         report['person_statistics'] = {**{k:v for k,v in state.get('person_statistics',{}).items() if k != 'assignments'}, 'status':state.get('people_status','not_started'), 'source':state.get('people_source'), 'error':state.get('people_error')}
         report['jev'] = jev.report(state)
         report['insights'] = insights.build(state)
+        report['local'] = local_models.report(state)
+        report['x_pulse'] = x_pulse.report(state)
         report['method'] = {'model':MODEL,'effort':EFFORT,'version':VERSION}
         for key in ('analysis','groups','targets','summary'):
             report.pop(key,None)
@@ -148,7 +162,7 @@ class LightweightStore(OpinionStore):
             info.update(schema_version='report.v4', summary_status=state.get('summary_status'), progress=1 if state['status']=='completed' else 0)
         return info
 
-    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest', person_id=None, stance=None, moment=None):
+    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest', person_id=None, stance=None, moment=None, sentiment=None, emotion=None, model_stance=None):
         state = self.get(run_id)
         if state.get('schema_version') != 'report.v4':
             return super().comments_page(run_id,group_id,search,offset,limit,analysis_status)
@@ -161,6 +175,11 @@ class LightweightStore(OpinionStore):
         assignments=state.get('person_statistics',{}).get('assignments',{}) if state.get('people_status') == 'completed' else {}
         if person_id:
             rows=[r for r in rows if person_id in assignments.get(r['comment_id'],{}) and (not stance or assignments[r['comment_id']][person_id]['label']==stance)]
+        local = state.get('local', {}) if state.get('local', {}).get('status') == 'completed' else {}
+        local_rows, local_people = local.get('rows', {}), local.get('person_rows', {})
+        if sentiment: rows = [r for r in rows if local_rows.get(r['comment_id'], [None])[0] == sentiment]
+        if emotion: rows = [r for r in rows if r['comment_id'] in local_rows and (local_rows[r['comment_id']][2] or 'none') == emotion]
+        if person_id and model_stance: rows = [r for r in rows if local_people.get(r['comment_id'], {}).get(person_id) == model_stance]
         if moment:
             start, end = moment
             duration = state['video'].get('duration_seconds')
@@ -169,7 +188,7 @@ class LightweightStore(OpinionStore):
         field = {'newest':'published_at','likes':'like_count','replies':'reply_count'}[sort]
         rows = sorted(rows,key=lambda r:(r.get(field) or ('' if field=='published_at' else 0),r['comment_id']),reverse=True)
         lookup = {r['comment_id']:r for r in state['comments']}
-        output = [{**r,'person_judgements':assignments.get(r['comment_id'],{}),'parent_text':lookup.get(r.get('parent_comment_id'),{}).get('text_original'), 'url':f"https://www.youtube.com/watch?v={state['video']['youtube_video_id']}&lc={r['comment_id']}"} for r in rows[offset:offset+limit]]
+        output = [{**r,'person_judgements':assignments.get(r['comment_id'],{}),'local':({'sentiment':local_rows[r['comment_id']][0],'polarity':local_rows[r['comment_id']][1],'emotion':local_rows[r['comment_id']][2],'people':local_people.get(r['comment_id'],{})} if r['comment_id'] in local_rows else None),'parent_text':lookup.get(r.get('parent_comment_id'),{}).get('text_original'), 'url':f"https://www.youtube.com/watch?v={state['video']['youtube_video_id']}&lc={r['comment_id']}"} for r in rows[offset:offset+limit]]
         return {'comments':output,'total':len(rows),'offset':offset,'limit':limit}
 
     def correct(self,*args,**kwargs):
@@ -182,8 +201,8 @@ class LightweightStore(OpinionStore):
         state = self.get(run_id)
         if state.get('schema_version') != 'report.v4':
             raise ValueError('旧方式は実行できません。')
-        if state.get('pending_action') == 'jev':
-            return jev.process(self, run_id)
+        side = {'jev': jev, 'local': local_models, 'x': x_pulse}.get(state.get('pending_action'))
+        if side: return side.process(self, run_id)
         started = time.monotonic()
         queued = datetime.fromisoformat(state.get('queued_at',now()))
         deadline = started + max(0,900-(datetime.now(timezone.utc)-queued).total_seconds())

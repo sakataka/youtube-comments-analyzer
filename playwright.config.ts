@@ -20,7 +20,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "YOUTUBE_API_KEY= YOUTUBE_FIXTURE_FALLBACK=1 DATA_DIR=/tmp/youtube-comments-analyzer-e2e-current .venv/bin/python -m backend.tests.e2e_server",
+      command: "YOUTUBE_API_KEY= YOUTUBE_FIXTURE_FALLBACK=1 LOCAL_MODELS=off X_SEARCH=off DATA_DIR=/tmp/youtube-comments-analyzer-e2e-current .venv/bin/python -m backend.tests.e2e_server",
       url: "http://127.0.0.1:8011/api/health",
       reuseExistingServer: false,
       timeout: 30_000

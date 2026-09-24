@@ -12,7 +12,7 @@ test('v4 集計と抽出要約から原文を検索できる', async ({ page }, 
   await expect(page.getByText('テスト用データです。実際の動画の反応ではありません。')).toBeVisible();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const navigation = page.getByRole('navigation', { name: '分析結果のセクション' });
-  for (const [label, heading] of [['全件集計', '取得した全件の集計'], ['上位と全体', '上に見えるコメントと、全体のずれ'], ['場面・時間', 'どの場面に反応し、いつ書かれたか'], ['Jev分類', 'YouTubeコメント分類器'], ['人物集計', '誰について語られているか'], ['話題・要約', 'このコメント欄で語られていること'], ['原文', '原文を読む']]) {
+  for (const [label, heading] of [['全件集計', '取得した全件の集計'], ['上位と全体', '上に見えるコメントと、全体のずれ'], ['賛否・感情', '全件の賛否と感情'], ['人物集計', '誰について語られているか'], ['場面・時間', 'どの場面に反応し、いつ書かれたか'], ['Xの反応', 'Xでの反応'], ['Jev分類', 'YouTubeコメント分類器'], ['話題・要約', 'このコメント欄で語られていること'], ['原文', '原文を読む']]) {
     await navigation.getByRole('link', { name: label, exact: true }).click();
     const target = page.getByRole('heading', { name: heading, exact: true });
     await expect(target).toBeFocused();
@@ -23,6 +23,7 @@ test('v4 集計と抽出要約から原文を検索できる', async ({ page }, 
   await expect(page.getByRole('button', { name: 'いいね上位', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#report-visible .opinion-original').first()).not.toBeEmpty();
   await expect(page.getByText('時刻を含むコメントは見つかりませんでした。')).toBeVisible();
+  await expect(page.getByText('ローカル分析は無効です（LOCAL_MODELS=off）。')).toBeVisible();
   const topicTitle = await page.locator('.opinion-card h3').first().innerText();
   await page.getByRole('button', { name: '根拠の原文を読む' }).first().click();
   await expect(page.getByRole('heading', { name: '原文を読む', exact: true })).toBeFocused();

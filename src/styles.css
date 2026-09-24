@@ -409,3 +409,18 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .insight-peaks blockquote { border-left: 2px solid var(--border); padding: 6px 12px; margin: 10px 0; font-size: .85rem; line-height: 1.8; white-space: pre-wrap; }
 .insight-static-bar { cursor: default; }
 @media (max-width: 520px) { .insight-people { grid-template-columns: 1fr; } .insight-histogram { height: 110px; gap: 1px; } }
+.insight-stacks { display: grid; gap: 10px; }
+.insight-stack-row { display: grid; grid-template-columns: 9rem 1fr; gap: 4px 12px; align-items: center; font-size: .85rem; }
+.insight-stack-row small { grid-column: 2; color: var(--muted-foreground); }
+.insight-stack { display: flex; height: 12px; overflow: hidden; border-radius: 6px; background: #8882; }
+.insight-stack-positive, .jev-bar.tone-positive .jev-track > span, .person-model-positive { background: #19836b; }
+.insight-stack-neutral, .jev-bar.tone-neutral .jev-track > span, .person-model-neutral { background: #9299a6; }
+.insight-stack-negative, .jev-bar.tone-negative .jev-track > span, .person-model-negative { background: #c45c51; }
+.person-model-mixed { background: #b38a35; }
+.person-model-unclear { background: #9299a633; }
+.jev-bar:disabled { cursor: default; opacity: .55; }
+.x-summary { font-size: 1rem; line-height: 1.9; }
+.x-posts { display: grid; gap: 12px; padding: 0; list-style: none; }
+.x-posts p { margin: 4px 0 0; font-size: .85rem; line-height: 1.75; }
+.x-posts a { font-size: .85rem; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .insight-stack-row { grid-template-columns: 1fr; } .insight-stack-row small { grid-column: 1; } }

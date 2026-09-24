@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { formatNumber, formatPercent } from '../api';
 import type { Insights, NotableComment } from '../types';
 import { Button } from './ui/button';
+import { sentimentLabels } from './ToneEmotionView';
 
 export function formatSeconds(value: number) {
   const h = Math.floor(value / 3600), m = Math.floor(value % 3600 / 60), s = value % 60;
@@ -27,6 +28,15 @@ export function VisibleVsAllView({ insights, onPerson }: { insights?: Insights; 
     <div className="opinion-section-heading"><span>HIGHLIGHTS / VISIBLE VS ALL</span><h2 tabIndex={-1}>上に見えるコメントと、全体のずれ</h2></div>
     <p>YouTubeで最初に目に入りやすい「いいね上位{visible.top_n}件の親コメント」と、取得した全件を比べます。AIは使っていません。人気順の表示はいいね数だけで決まらないため、上位は近似です。</p>
     <div className="opinion-metrics"><span>上位{visible.top_n}件が全いいねの <b>{formatPercent(visible.top_like_share)}</b></span><span>いいね0の親コメント <b>{formatNumber(visible.zero_like_parents)}</b> / {formatNumber(visible.parents)}件</span></div>
+    {visible.sentiment ? <>
+      <h3 className="insight-subheading">賛否の見え方</h3>
+      <div className="insight-stacks">{([['all', '取得全件'], ['top', `いいね上位${visible.top_n}件`], ['likes', 'いいねで重み付け']] as const).map(([id, label]) => <div key={id} className="insight-stack-row">
+        <span>{label}</span>
+        <span className="insight-stack" aria-label={`${label}：${Object.entries(sentimentLabels).map(([k, v]) => `${v} ${formatPercent(visible.sentiment![id][k] ?? 0, 0)}`).join('、')}`}>{Object.keys(sentimentLabels).map(k => <span key={k} className={`insight-stack-${k}`} style={{ width: `${(visible.sentiment![id][k] ?? 0) * 100}%` }} />)}</span>
+        <small>{Object.entries(sentimentLabels).map(([k, v]) => `${v} ${formatPercent(visible.sentiment![id][k] ?? 0, 0)}`).join(' / ')}</small>
+      </div>)}</div>
+      <p className="opinion-note">ローカルモデルによる参考判定です。「いいねで重み付け」は、いいね数の多い投稿ほど大きく数えた割合です。</p>
+    </> : null}
     {visible.people.length ? <>
       <h3 className="insight-subheading">人物ごとの見え方</h3>
       <p className="opinion-note">「全件」は取得全件のうちその人物に言及した割合、「上位」はいいね上位{visible.top_n}件に占める割合、「いいね」は全いいねのうち言及した投稿が集めた割合です。棒の長さは表示中の最大値を基準にしています。人物辞書の一致に基づきます。</p>

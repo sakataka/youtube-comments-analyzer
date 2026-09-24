@@ -47,6 +47,13 @@ def visible_vs_all(state, rows, top):
     total_likes = sum(map(likes, rows))
     parents = [r for r in rows if not r.get('is_reply')]
     result = {'top_n': len(top), 'parents': len(parents), 'top_like_share': sum(map(likes, top)) / total_likes if total_likes else 0, 'zero_like_parents': sum(not likes(r) for r in parents), 'people': []}
+    local = state.get('local', {})
+    if local.get('status') == 'completed' and local.get('rows'):
+        labels = local['rows']
+        def shares(subset, weight=lambda r: 1):
+            total = sum(weight(r) for r in subset if r['comment_id'] in labels)
+            return {v: sum(weight(r) for r in subset if labels.get(r['comment_id'], [None])[0] == v) / total if total else 0 for v in ('positive', 'neutral', 'negative')}
+        result['sentiment'] = {'all': shares(rows), 'top': shares(top), 'likes': shares(rows, likes)}
     stats = state.get('person_statistics', {})
     if state.get('people_status') != 'completed' or not stats.get('people'): return result
     assignments, top_ids = stats.get('assignments', {}), {r['comment_id'] for r in top}
