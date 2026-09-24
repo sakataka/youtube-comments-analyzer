@@ -151,8 +151,9 @@ def export_run(run_id: str) -> dict[str, Any]:
 
 
 @app.get('/api/runs/{run_id}/comments')
-def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest', person_id: str | None = None, stance: Literal['positive','negative','mixed','unclear'] | None = None) -> dict[str, Any]:
-    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort, person_id, stance)
+def get_comments(run_id: str, group_id: str | None = None, search: str | None = None, analysis_status: Literal['held'] | None = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=30, ge=1, le=100), sort: Literal['newest', 'likes', 'replies'] = 'newest', person_id: str | None = None, stance: Literal['positive','negative','mixed','unclear'] | None = None, moment_start: int | None = Query(default=None, ge=0), moment_end: int | None = Query(default=None, ge=1)) -> dict[str, Any]:
+    moment = (moment_start, moment_end) if moment_start is not None and moment_end is not None else None
+    return opinion_store.comments_page(run_id, group_id, search, offset, limit, analysis_status, sort, person_id, stance, moment)
 
 
 @app.post('/api/runs/{run_id}/actions')

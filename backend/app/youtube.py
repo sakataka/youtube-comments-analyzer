@@ -45,6 +45,13 @@ def optional_int(value: Any) -> int | None:
         return None
 
 
+def parse_duration(value):
+    match = re.fullmatch(r'P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', value or '')
+    if not match or not value.strip('PT'): return None
+    d, h, m, s = (int(x or 0) for x in match.groups())
+    return ((d * 24 + h) * 60 + m) * 60 + s
+
+
 def comment_from_snippet(
     comment_id: str,
     snippet: dict[str, Any],
@@ -93,7 +100,7 @@ class YouTubeCommentClient:
     def _fetch_video_metadata(self, api_key: str, url: str, video_id: str) -> dict[str, Any]:
         payload = self._get_json("https://www.googleapis.com/youtube/v3/videos", {
             "key": api_key,
-            "part": "snippet,statistics",
+            "part": "snippet,statistics,contentDetails",
             "id": video_id,
         })
         items = payload.get("items", [])
@@ -113,6 +120,7 @@ class YouTubeCommentClient:
             "comment_count_available": comment_count is not None,
             "youtube_view_count": optional_int(statistics.get("viewCount")),
             "youtube_like_count": optional_int(statistics.get("likeCount")),
+            "duration_seconds": parse_duration(items[0].get("contentDetails", {}).get("duration")),
         }
 
     def _get_json(self, endpoint: str, query: dict[str, Any]) -> dict[str, Any]:

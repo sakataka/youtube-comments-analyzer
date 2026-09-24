@@ -383,3 +383,29 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .report-section-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 10px; color: var(--primary); font-size: .875rem; text-decoration: underline; text-underline-offset: 4px; }
 .opinion-section h2[tabindex] { scroll-margin-top: 140px; }
 .opinion-section h2[tabindex]:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+
+.insight-subheading { margin: 32px 0 8px; font-size: 1.05rem; font-weight: 600; }
+.insight-clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.insight-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.insight-person { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.insight-person:hover { background: var(--muted); }
+.insight-person:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+.insight-meter { display: grid; grid-template-columns: 4.5rem 1fr 3.5rem; align-items: center; gap: 8px; font-size: .78rem; color: var(--muted-foreground); }
+.insight-meter small:last-child { text-align: right; color: var(--foreground); }
+.jev-track > .insight-fill-all { background: #718096; }
+.jev-track > .insight-fill-top { background: var(--primary); }
+.jev-track > .insight-fill-likes { background: #19836b; }
+.insight-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.insight-histogram { display: flex; align-items: flex-end; gap: 2px; height: 140px; margin-top: 12px; padding-bottom: 1px; border-bottom: 1px solid var(--border); }
+.insight-histogram button { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.insight-histogram button:disabled { cursor: default; }
+.insight-histogram button > span { display: block; width: 100%; min-height: 0; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--primary) 70%, transparent); }
+.insight-histogram button:hover:not(:disabled) > span, .insight-histogram button[aria-pressed="true"] > span { background: var(--primary); }
+.insight-histogram button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.insight-axis { display: flex; justify-content: space-between; font-size: .75rem; color: var(--muted-foreground); margin-top: 4px; }
+.insight-peaks { display: grid; gap: 4px; padding-left: 1.4rem; }
+.insight-peaks li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.insight-peaks p { margin: 0; font-size: .88rem; }
+.insight-peaks blockquote { border-left: 2px solid var(--border); padding: 6px 12px; margin: 10px 0; font-size: .85rem; line-height: 1.8; white-space: pre-wrap; }
+.insight-static-bar { cursor: default; }
+@media (max-width: 520px) { .insight-people { grid-template-columns: 1fr; } .insight-histogram { height: 110px; gap: 1px; } }

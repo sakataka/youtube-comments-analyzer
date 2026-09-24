@@ -34,7 +34,7 @@ export type DataSummary = { run_count: number; total_bytes: number; runs: { byte
 export type RunState = { run_id: string; status: string; created_at: string; review_status: string; video: { title: string; channel_title: string; youtube_video_id: string }; fetch_summary: { max_comments_fetched: number } };
 
 export type LightReport = Omit<OpinionReport, 'schema_version' | 'analysis' | 'groups' | 'targets' | 'summary' | 'method'> & {
-  schema_version: 'report.v4'; summary_status: string; jev?: JevReport; person_statistics?: PersonStatistics;
+  schema_version: 'report.v4'; summary_status: string; jev?: JevReport; person_statistics?: PersonStatistics; insights?: Insights;
   topics: Array<{ id: string; title: string; description: string; reactions: string; evidence: Array<{ comment_id: string; quote: string }> }>;
   sample: { candidate_count?: number; sent_count?: number; truncated_count?: number; reasons?: Record<string, number> };
   statistics: { likes: number; duplicate_comments: number; dated_comments: number };
@@ -51,4 +51,12 @@ export type JevReport = {
   configured: boolean; status: string; version?: string; selection?: string; error?: string; total?: number; cache_hits?: number;
   usage?: { calls: number; input_tokens: number; output_tokens: number };
   rows: Array<{ comment_id: string; kind: string; tone: string; kind_confidence: number; tone_confidence: number; truncated: boolean; text: string; url: string }>;
+};
+
+export type NotableComment = { comment_id: string; text: string; like_count: number; reply_count: number; is_reply: boolean; published_at: string | null; parent_text: string | null; metric: string | null; url: string };
+export type Insights = {
+  visible: { top_n: number; parents: number; top_like_share: number; zero_like_parents: number; people: Array<{ id: string; name: string; all_rate: number; top_count: number; top_rate: number; like_share: number }> };
+  moments: { comment_count: number; index_comments: number; bin_seconds: number | null; duration_seconds: number | null; bins: Array<{ start: number; end: number; comment_count: number; likes: number; sample: NotableComment | null }> };
+  timeline: { undated: number; bins: Array<{ label: string; comment_count: number; replies: number; likes: number }> };
+  notable: Array<{ id: string; title: string; description: string; items: NotableComment[] }>;
 };

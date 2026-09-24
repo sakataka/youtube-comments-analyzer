@@ -14,6 +14,7 @@ from .opinion_fetch import fetch_round
 from .opinion_service import OpinionStore, now
 from . import person_statistics as people_rules
 from . import jev
+from . import insights
 
 MODEL, EFFORT = 'gpt-6-sol', 'medium'
 VERSION = 'sample-v1'
@@ -134,6 +135,7 @@ class LightweightStore(OpinionStore):
         report.update(schema_version='report.v4', topics=state.get('topics',[]), summary_status=state.get('summary_status','not_started'), sample={k:v for k,v in state.get('sample',{}).items() if k!='items'}, attempts=state.get('attempts',[]), statistics={'likes':sum(int(r.get('like_count') or 0) for r in state['comments']), 'duplicate_comments':sum(n-1 for n in counts.values()), 'dated_comments':sum(bool(r.get('published_at')) for r in state['comments'])})
         report['person_statistics'] = {**{k:v for k,v in state.get('person_statistics',{}).items() if k != 'assignments'}, 'status':state.get('people_status','not_started'), 'source':state.get('people_source'), 'error':state.get('people_error')}
         report['jev'] = jev.report(state)
+        report['insights'] = insights.build(state)
         report['method'] = {'model':MODEL,'effort':EFFORT,'version':VERSION}
         for key in ('analysis','groups','targets','summary'):
             report.pop(key,None)
@@ -146,7 +148,7 @@ class LightweightStore(OpinionStore):
             info.update(schema_version='report.v4', summary_status=state.get('summary_status'), progress=1 if state['status']=='completed' else 0)
         return info
 
-    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest', person_id=None, stance=None):
+    def comments_page(self, run_id, group_id, search, offset, limit, analysis_status=None, sort='newest', person_id=None, stance=None, moment=None):
         state = self.get(run_id)
         if state.get('schema_version') != 'report.v4':
             return super().comments_page(run_id,group_id,search,offset,limit,analysis_status)
@@ -159,6 +161,10 @@ class LightweightStore(OpinionStore):
         assignments=state.get('person_statistics',{}).get('assignments',{}) if state.get('people_status') == 'completed' else {}
         if person_id:
             rows=[r for r in rows if person_id in assignments.get(r['comment_id'],{}) and (not stance or assignments[r['comment_id']][person_id]['label']==stance)]
+        if moment:
+            start, end = moment
+            duration = state['video'].get('duration_seconds')
+            rows = [r for r in rows if any(start <= t < end for t in insights.moment_seconds(r['text_original'], duration))]
         if search: rows = [r for r in rows if search.casefold() in r['text_original'].casefold()]
         field = {'newest':'published_at','likes':'like_count','replies':'reply_count'}[sort]
         rows = sorted(rows,key=lambda r:(r.get(field) or ('' if field=='published_at' else 0),r['comment_id']),reverse=True)
