@@ -8,15 +8,10 @@ fixture_directory = tempfile.TemporaryDirectory(prefix='comments-e2e-isolated-')
 os.environ['DATA_DIR'] = fixture_directory.name
 os.environ['DATABASE_URL'] = str(Path(fixture_directory.name) / 'test.sqlite3')
 os.environ['YOUTUBE_API_KEY'] = ''
-os.environ['TYPESAFE_API_KEY'] = 'e2e-test-only'
 os.environ['YOUTUBE_FIXTURE_FALLBACK'] = '1'
 
 from backend.app.main import app, opinion_store
 from backend.tests.test_lightweight import FakeSummary
-
-from backend.app import jev
-from backend.tests.test_jev import fake_response
-jev.evaluate = fake_response
 
 original = opinion_store.process
 

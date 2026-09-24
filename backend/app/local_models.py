@@ -5,7 +5,7 @@ import re
 import threading
 import time
 
-from . import jev
+from .opinion_service import restore_previous
 from . import person_statistics as people_rules
 
 VERSION = 'local-v2'
@@ -112,7 +112,7 @@ def compute(state, stopped=lambda: False):
 
 def process(store, run_id):
     state = store.get(run_id)
-    previous = jev.restore_previous(state)
+    previous = restore_previous(state)
     result = state.setdefault('local', {})
     result.update(status='running', error=None, version=VERSION, models={'sentiment': SENTIMENT_MODEL[0], 'emotion': EMOTION_MODEL[0]})
     state.update(status='running', stage='local')

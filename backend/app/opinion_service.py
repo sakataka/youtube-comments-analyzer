@@ -16,6 +16,11 @@ from .transcripts import fetch_transcript, parse_subtitles
 from .youtube import parse_youtube_video_id
 
 
+def restore_previous(state):
+    """Side jobs (local models, X) leave the run's own status as it was before queueing."""
+    return state.pop('previous_status', 'paused'), state.pop('previous_stage', 'saved'), state.pop('previous_error', None)
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

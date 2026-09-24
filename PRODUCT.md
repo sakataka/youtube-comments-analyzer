@@ -14,7 +14,7 @@ web
 
 ## Product Purpose
 
-公開コメントの全件集計、抽出要約、人物への言及、任意のJev分類を参照し、根拠原文に戻りながら話題と反応を把握する。操作速度、根拠原文への到達、状態の明確さを優先する。
+公開コメントの全件集計、抽出要約、全件の賛否と感情、人物への言及、Xの反応を参照し、根拠原文に戻りながら話題と反応を把握する。操作速度、根拠原文への到達、状態の明確さを優先する。
 
 ## Operating Context
 
@@ -22,7 +22,7 @@ web
 - React / TypeScript / Vite / Tailwind / Radix系UI、Pythonバックエンド。JavaScriptはBun（package.jsonのpackageManagerが基準）、Pythonは既存uv環境を使う。
 - LocalWebの通常ホストは `http://youtube-comments-analyzer.localhost/`。`?run=...` で保存済み分析を開く。
 - デスクトップとモバイルWebを扱う。主なモバイル確認対象は420×912 CSS px。周辺幅でも操作できること。OSのダークモードに追従する。
-- URL入力→取得と集計→要約・人物集計→必要ならJev分類→原文検索・絞り込み・並べ替え、というワークフロー。
+- URL入力→取得と集計→要約・人物集計→ローカル判定・X検索（自動）→タブで結果を読み、根拠の原文をサイドパネルで確認、というワークフロー。
 
 ## Capabilities and Constraints
 
@@ -30,9 +30,9 @@ web
 - 取得は1回最大5,000件。要約は最大250件の抽出コメントを使用。親・返信・投稿時期の無作為抽出を中心に高評価・返信多数を補足する。要約から全体の賛否率を推定しない。
 - 要約と人物辞書は通常各1回、修復込み最大4回。通常要約180秒、処理全体15分の期限。取得済みデータとチェックポイントを保持する。
 - 人物集計は名前・別名辞書の一致を全件から数える。評価はルールによる参考値。「判定できず」は中立ではない。辞書未一致を人物への言及なしと解釈しない。
-- Jevは任意。取得済みのいいね上位最大500件を最大10並列・5分で分類し、本文・返信先・動画タイトルをTypeSafeへ送る。種類と5段階評価に加え、賛否混在と判定困難を区別する。低確信度は暫定。過去の固定抽出結果も表示可能。
+- 全件の賛否・感情はローカルモデル（AIトークン不使用）、Xの反応はGrok CLIで取得する。どちらも参考値で、失敗しても要約・集計・原文は使える。Jev（TypeSafe）分類は2026-09-24にローカル判定と重複するため廃止した。
 - 同一入力の分類キャッシュ、停止、途中保存、再試行を維持する。APIキーはサーバー側の.envに置き、UIやGitへ公開しない。
-- 旧report.v3の保存結果を保持する。v4を主対象に評価するが旧結果を無断で削除・変換しない。
+- 旧report.v3のrunは削除・変換せず保持する。画面では詳細を表示せず、保存原文からの再分析だけを提供する。
 
 ## Brand Commitments
 
@@ -41,14 +41,14 @@ web
 ## Evidence on Hand
 
 - README.md、docs/lightweight-analysis-design.md、docs/person-statistics-design.md。
-- src/components/StartScreen.tsx、LightReportView.tsx、JevClassification.tsx、PersonStatisticsView.tsx、SettingsPanel.tsx、src/styles.css。
-- e2e/ の原文到達・検索、人物集計、Jev分類・再利用、設定フォーカス、削除確認のテスト。
+- src/components/StartScreen.tsx、LightReportView.tsx、ReportOverview.tsx、ReactionsView.tsx、PeopleView.tsx、MomentsView.tsx、XPulseView.tsx、CommentBrowser.tsx、SettingsPanel.tsx、src/styles.css。
+- e2e/ のタブ切り替え、サイドパネルでの原文到達とフォーカス復帰、原文検索、人物集計、設定フォーカス、削除確認のテスト。
 - 稼働画面に保存済みv4結果がある。実原文・APIキー・DB・スクリーンショットはこの文書やGitへ転記しない。性能の実例を一般的な保証にしない。
 
 ## Product Principles
 
 1. 分析の見栄えより、原文と集計の正確な範囲を確認できること。
-2. 取得、要約、人物集計、Jev分類の状態と母集団を混同させないこと。
+2. 取得、要約、人物集計、ローカル判定、X検索の状態と母集団を混同させないこと。
 3. 情報密度を保ちながら、目的の情報へ短い操作で到達できること。
 4. 失敗時も取得済みデータを失わず、続行・停止・再試行を理解できること。
 5. 既存の利用習慣と標準的な操作を尊重し、装飾のために作業を遅くしないこと。

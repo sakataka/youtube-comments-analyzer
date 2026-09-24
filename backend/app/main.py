@@ -40,7 +40,7 @@ class RunCreateRequest(RequestModel):
 
 
 class OpinionAction(RequestModel):
-    action: Literal['continue', 'stop', 'resume', 'people', 'jev', 'local', 'x']
+    action: Literal['continue', 'stop', 'resume', 'people', 'local', 'x']
 
 
 class TranscriptImport(RequestModel):

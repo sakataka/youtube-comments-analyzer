@@ -8,8 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import jev
-from .opinion_service import now
+from .opinion_service import now, restore_previous
 
 TIMEOUT_SECONDS = int(os.getenv('X_SEARCH_TIMEOUT_SECONDS') or 480)
 POST_URL = re.compile(r'^https://(?:x|twitter)\.com/[A-Za-z0-9_]{1,15}/status/\d{5,25}(?:[/?#].*)?$')
@@ -101,7 +100,7 @@ def sanitize(value):
 
 def process(store, run_id, runner=None):
     state = store.get(run_id)
-    previous = jev.restore_previous(state)
+    previous = restore_previous(state)
     result = state.setdefault('x_pulse', {})
     result.update(status='running', error=None)
     state.update(status='running', stage='x')

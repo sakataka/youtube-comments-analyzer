@@ -7,7 +7,6 @@ NOTABLE_N = 5
 TIMESTAMP = re.compile(r'(?<![\d:])(?:(\d{1,2}):)?(\d{1,3}):(\d{2})(?![\d:])')
 MOMENT_BINS = (30, 60, 120, 300, 600, 1200)
 ELAPSED_BINS = ((0, 1, '1時間以内'), (1, 6, '1〜6時間'), (6, 24, '6〜24時間'), (24, 72, '1〜3日'), (72, 168, '3〜7日'), (168, None, '7日以降'))
-NEGATIVE_TONES = ('very_negative', 'negative', 'mixed')
 INDEX_TIMESTAMPS = 4  # chapter lists, not reactions to one scene
 
 
@@ -108,11 +107,10 @@ def notable(state, rows, lookup, top):
         {'id': 'rising', 'title': '上位の外で伸びている', 'description': f'いいね上位{TOP_N}件に入らない投稿を、投稿から取得までの1時間あたりいいね数で並べました。新しい投稿ほど上位に見えにくい分を補います。', 'items': [item(r, lookup, video_id, f'1時間あたり {per_hour(r):.1f}いいね') for r in rising[:NOTABLE_N]]},
         {'id': 'replies', 'title': '返信の中で支持された', 'description': '折りたたまれて見落としやすい返信のうち、いいねの多いものです。', 'items': [item(r, lookup, video_id, f'いいね {likes(r)}') for r in replies[:NOTABLE_N]]},
     ]
-    jev = state.get('jev', {})
-    if jev.get('version') == 'sentiment-v2' and jev.get('rows'):
-        tones = {r['comment_id']: r['tone'] for r in jev['rows'] if r['tone'] in NEGATIVE_TONES}
-        critical = sorted((lookup[cid] for cid in tones if cid in lookup and likes(lookup[cid])), key=lambda r: (-likes(r), r['comment_id']))
-        groups.append({'id': 'critical', 'title': '否定・賛否混在なのに支持された', 'description': 'Jev分類済みの範囲で、ネガティブまたは賛否混在と分類され、いいねを集めた投稿です。分類は暫定値を含みます。', 'items': [item(r, lookup, video_id, f'いいね {likes(r)}') for r in critical[:NOTABLE_N]]})
+    local = state.get('local', {})
+    if local.get('status') == 'completed' and local.get('rows'):
+        critical = sorted((r for r in rows if likes(r) >= 2 and local['rows'].get(r['comment_id'], [None])[0] == 'negative'), key=lambda r: (-likes(r), r['comment_id']))
+        groups.append({'id': 'critical', 'title': '否定的なのに支持された', 'description': 'ローカルモデルが否定的と判定し、いいねを集めた投稿です。ツッコミや皮肉が混ざることがあります。', 'items': [item(r, lookup, video_id, f'いいね {likes(r)}') for r in critical[:NOTABLE_N]]})
     return [g for g in groups if g['items']]
 
 

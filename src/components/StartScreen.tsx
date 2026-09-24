@@ -74,7 +74,7 @@ export function StartScreen({
         <SectionMarker index="01" label="ANALYZE" />
         <section className="start-hero" aria-labelledby="start-title">
           <h1 id="start-title">YouTubeコメントを分析</h1>
-          <p className="opinion-note">全件を集計し、最大250件の抽出コメントをGPT-6 Solで要約します。人物名・別名の辞書で全件の言及と評価も参考集計します。AIは通常2回。根拠の原文を確認しながら、話題と反応をつかめます。</p>
+          <p className="start-lead">コメントを全件取得して、話題の要約・賛否と感情・人物への言及をまとめます。どの数字からも根拠の原文を開けます。</p>
           <form className="analysis-form" onSubmit={onSubmit}>
           <FieldLabel htmlFor="youtube-url">YouTube動画のURL</FieldLabel>
           <div className="analysis-form__primary">
@@ -135,7 +135,7 @@ export function StartScreen({
             compact
             id="recent-title"
             title="最近の分析"
-            description="保存済みのレポートを、そのまま続きから開けます。"
+            description="保存済みのレポートを開けます。"
             aside={history.length ? (
               <div className="recent-actions">
                 <span>{historyCount}件</span>

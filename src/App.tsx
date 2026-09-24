@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from './api';
-import { OpinionReportView } from './components/OpinionReportView';
+import { ReportPage } from './components/ReportPage';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StartScreen } from './components/StartScreen';
 import { Toaster } from './components/ui/sonner';
@@ -59,7 +59,7 @@ export default function App() {
     finally { setBusy(false); }
   }
   return <>
-    {runId ? <OpinionReportView runId={runId} onNewAnalysis={home} onOpenSettings={() => { setSettingsOpen(true); void refresh().catch(showError); }} onOpenRun={openRun} /> : <StartScreen url={url} setUrl={setUrl} maxComments={maxComments} setMaxComments={setMaxComments} replyMode={replyMode} setReplyMode={setReplyMode} forceRefresh={forceRefresh} setForceRefresh={setForceRefresh} settings={settings} history={history} historyCount={data?.run_count ?? 0} busy={busy} onSubmit={startRun} onOpenRun={openRun} onDeleteRun={id => void dataAction(id ? 'delete_run' : 'delete_all_runs', id)} onOpenSettings={() => setSettingsOpen(true)} />}
+    {runId ? <ReportPage runId={runId} onNewAnalysis={home} onOpenSettings={() => { setSettingsOpen(true); void refresh().catch(showError); }} onOpenRun={openRun} /> : <StartScreen url={url} setUrl={setUrl} maxComments={maxComments} setMaxComments={setMaxComments} replyMode={replyMode} setReplyMode={setReplyMode} forceRefresh={forceRefresh} setForceRefresh={setForceRefresh} settings={settings} history={history} historyCount={data?.run_count ?? 0} busy={busy} onSubmit={startRun} onOpenRun={openRun} onDeleteRun={id => void dataAction(id ? 'delete_run' : 'delete_all_runs', id)} onOpenSettings={() => setSettingsOpen(true)} />}
     <SettingsPanel settings={settings} data={data} busy={busy} open={settingsOpen} onClose={() => { setSettingsOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-dialog-trigger="settings"]')?.focus()); }} onDataAction={action => void dataAction(action)} />
     <Toaster closeButton richColors position="bottom-right" />
   </>;

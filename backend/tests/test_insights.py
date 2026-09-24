@@ -45,9 +45,9 @@ class InsightsTests(unittest.TestCase):
         page = self.store.comments_page(run, None, None, 0, 30, sort='likes', moment=(60, 120))
         self.assertEqual([r['comment_id'] for r in page['comments']], ['top', 'low']); self.assertEqual(page['limit'], 30)
 
-    def test_people_comparison_and_critical_from_jev(self):
+    def test_people_comparison_and_critical_from_local_model(self):
         rows = [row('a', '佐久間さん最高', 10), row('b', '佐久間さん', 0), row('c', '別の話', 30)]
-        state = {**seed(rows), 'people_status': 'completed', 'person_statistics': {'people': [{'id': 'p1', 'name': '佐久間'}], 'assignments': {'a': {'p1': {}}, 'b': {'p1': {}}}}, 'jev': {'version': 'sentiment-v2', 'rows': [{'comment_id': 'c', 'tone': 'negative'}, {'comment_id': 'a', 'tone': 'positive'}]}}
+        state = {**seed(rows), 'people_status': 'completed', 'person_statistics': {'people': [{'id': 'p1', 'name': '佐久間'}], 'assignments': {'a': {'p1': {}}, 'b': {'p1': {}}}}, 'local': {'status': 'completed', 'rows': {'c': ['negative', -0.8, None], 'a': ['positive', 0.9, 'joy'], 'b': ['negative', -0.5, None]}}}
         result = insights.build(state)
         person = result['visible']['people'][0]
         self.assertAlmostEqual(person['all_rate'], 2 / 3); self.assertEqual(person['top_count'], 2); self.assertAlmostEqual(person['like_share'], 10 / 40)
